@@ -2,6 +2,7 @@ import os,sys,time
 from rpi_hardware_pwm import HardwarePWM
 
 sys.path.append('../src')
+from bbnk.servo import Servo
 
 
 def s1():
@@ -13,6 +14,14 @@ def s1():
         12: a0    pd | lo // GPIO12 = PWM0_CHAN0
 
         /sys/class/pwm/pwmchip0/pwm3/
+
+        https://github.com/Pioreactor/rpi_hardware_pwm
+        sudo nano /boot/firmware/config.txt
+        added this:
+        dtoverlay=pwm-2chan,pin=18,func=2,pin2=12,func2=4
+        alternatives:
+        dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4,pin3=14,func3=4,pin4=15,func4=4
+        dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4,pin3=18,func3=2,pin4=19,func2=2
 
         pip install rpi-hardware-pwm
 
@@ -53,7 +62,44 @@ def s1():
         pwm.change_duty_cycle(10*x)
         time.sleep(1)
 
+def s2():
+    ''' pwm test using the new servo class '''
+    S = Servo(12, 50, 500, 2500, 0, 270)
+
+    for x in range(11):
+        S.setDegrees(x/10.0*270)
+        print('degrees:',S.getDegrees())
+        time.sleep(1)
+    S.setDegrees(0)
+
+def s3():
+    ''' dual servo test '''
+
+    Yaw = Servo(18, 50, 500+100, 2500-100, 0, 270)
+    Pitch = Servo(12, 50, 500+100, 2500-100, 0, 270)
+
+    Yaw.setDegrees(0)
+    Pitch.setDegrees(0)
+
+def s4():
+    ''' solenoid + mosfet test '''
+    from gpiozero import DigitalOutputDevice
+
+    solenoid = DigitalOutputDevice(15)
+
+    # turn gpio pin 15 on
+    print('turning on')
+    solenoid.on()
+    time.sleep(1)
+    # turn gpio pin 15 off
+    print('turning off')
+    solenoid.off()
+    solenoid.close()
+
 def main():
+    return s4()
+    return s3()
+    return s2()
     return s1()
 
 if __name__ == "__main__":
