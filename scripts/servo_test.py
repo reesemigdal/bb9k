@@ -3,6 +3,7 @@ from rpi_hardware_pwm import HardwarePWM
 
 sys.path.append('../src')
 from bbnk.servo import Servo
+from bbnk.blaster import Blaster
 
 
 def s1():
@@ -96,7 +97,28 @@ def s4():
     solenoid.off()
     solenoid.close()
 
+def s5():
+    ''' create an instantiation of the blaster and aim_at something intuitive, like 1 meter straight ahead
+        using 15 meters per second for water speed
+    '''
+    blaster = Blaster(
+        yaw_servo_params=dict(gpio_pin=18, pwm_hz=50, min_pulse_us=500+100, max_pulse_us=2500-100, min_angle_deg=0, max_angle_deg=270),
+        pitch_servo_params=dict(gpio_pin=12, pwm_hz=50, min_pulse_us=500+100, max_pulse_us=2500-100, min_angle_deg=0, max_angle_deg=270),
+        solenoid_gpio_pin=15,
+        water_velocity_mps=15,
+        pitch_invert=True,
+    )
+    print('aim:', blaster.aim_at(0, 0, 1))
+    print('aim:', blaster.aim_at(0, 0, -1))
+    print('aim:', blaster.aim_at(0, 0, 0))
+    print('aim:', blaster.aim_at(0, 10, 0, True))
+    print('aim:', blaster.aim_at(0, 10, 0, False))
+    print('aim:', blaster.aim_at(0, 10, -2, True))
+    print('aim:', blaster.aim_at(0, 10, -2, False))
+
+
 def main():
+    return s5() # 1st full blaster instantiation
     return s4()
     return s3()
     return s2()

@@ -59,7 +59,33 @@ class Blaster:
         self.pitch_zero_offset_deg = pitch_zero_offset_deg
         self.gravity_mps2 = gravity_mps2
 
-    def _solve_pitch_rad(self, horizontal_dist_m: float, height_m: float):
+    def _solve_pitch_rad_reese(self, horizontal_dist_m: float, height_m: float):
+        """Return (low_arc_rad, high_arc_rad) launch angles, or None if unreachable."""
+        x = horizontal_dist_m
+        if x == 0:
+            x = 0.000000000001
+
+        y = height_m
+        print(x, y)
+        velo = self.water_velocity_mps
+        g = self.gravity_mps2
+
+        A = (-g*x**2)/(2*velo**2)
+        B = x
+        C = (-g*x**2)/(2*velo**2)-y
+
+        disc_before_squarerooted = B**2-4*A*C
+        if disc_before_squarerooted<0:
+            print("messedup",disc_before_squarerooted)
+            return None
+
+        disc = math.sqrt(disc_before_squarerooted)
+        ans1 = math.atan((-x + disc) /(2*A))
+        ans2 = math.atan((-x - disc) /(2*A))
+
+        return ans1,ans2
+
+    def _solve_pitch_rad_old(self, horizontal_dist_m: float, height_m: float):
         """Return (low_arc_rad, high_arc_rad) launch angles, or None if unreachable."""
         if horizontal_dist_m < 1e-9:
             theta = math.pi / 2 if height_m >= 0 else -math.pi / 2
@@ -78,7 +104,7 @@ class Blaster:
 
     def is_reachable(self, x: float, y: float, z: float) -> bool:
         """Whether (x, y, z) can be hit at the configured water velocity."""
-        return self._solve_pitch_rad(math.hypot(x, y), z) is not None
+        return self._solve_pitch_rad_reese(math.hypot(x, y), z) is not None
 
     def aim_at(self, x: float, y: float, z: float, prefer_high_arc: bool = False) -> AimSolution:
         """Point yaw/pitch servos to hit world point (x, y, z).
@@ -88,7 +114,8 @@ class Blaster:
         """
         yaw_deg = math.degrees(math.atan2(x, y))
 
-        solutions = self._solve_pitch_rad(math.hypot(x, y), z)
+        #solutions = self._solve_pitch_rad(math.hypot(x, y), z)
+        solutions = self._solve_pitch_rad_reese(math.hypot(x, y), z)
         if solutions is None:
             raise ValueError(
                 f"target ({x}, {y}, {z}) is out of range at "
