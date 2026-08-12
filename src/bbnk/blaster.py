@@ -24,12 +24,13 @@ class Blaster:
 
     World coordinates passed to aim_at() are centered on the blaster's pivot:
         X = right, Y = forward (horizontal), Z = up.
-    Yaw 0 deg / pitch 0 deg (world frame) means "aim straight ahead, level" and
-    is assumed to correspond to each servo's own center_angle_deg. If the
-    horns are mounted such that increasing servo angle turns the opposite way
-    from increasing world angle, set yaw_invert/pitch_invert. If center isn't
-    exactly forward/level after mounting, correct it with
-    yaw_zero_offset_deg/pitch_zero_offset_deg.
+    Yaw 0 deg / pitch 0 deg (world frame) means "aim straight ahead, level".
+    yaw_zero_offset_deg/pitch_zero_offset_deg are the raw servo angles that
+    correspond to that world-frame 0 (i.e. where each servo physically sits
+    when aimed straight ahead/level); they default to each servo's own
+    center_angle_deg. If the horns are mounted such that increasing servo
+    angle turns the opposite way from increasing world angle, set
+    yaw_invert/pitch_invert.
 
     Pitch is solved ballistically (projectile motion under gravity, given
     water_velocity_mps) rather than pointed straight at the target, so aim_at()
@@ -44,19 +45,23 @@ class Blaster:
         water_velocity_mps: float,
         yaw_invert: bool = False,
         pitch_invert: bool = False,
-        yaw_zero_offset_deg: float = 0.0,
-        pitch_zero_offset_deg: float = 0.0,
+        yaw_zero_offset_deg: float = None,
+        pitch_zero_offset_deg: float = None,
         gravity_mps2: float = GRAVITY_MPS2,
     ):
-        self.yaw = Servo(**yaw_servo_params)
-        self.pitch = Servo(**pitch_servo_params)
+        raw_yaw = Servo(**yaw_servo_params)
+        raw_pitch = Servo(**pitch_servo_params)
+        if yaw_zero_offset_deg is None:
+            yaw_zero_offset_deg = raw_yaw.center_angle_deg
+        if pitch_zero_offset_deg is None:
+            pitch_zero_offset_deg = raw_pitch.center_angle_deg
+        self.yaw = FrameServo(raw_yaw, yaw_zero_offset_deg)
+        self.pitch = FrameServo(raw_pitch, pitch_zero_offset_deg)
         self.solenoid = DigitalOutputDevice(solenoid_gpio_pin)
 
         self.water_velocity_mps = water_velocity_mps
         self.yaw_invert = yaw_invert
         self.pitch_invert = pitch_invert
-        self.yaw_zero_offset_deg = yaw_zero_offset_deg
-        self.pitch_zero_offset_deg = pitch_zero_offset_deg
         self.gravity_mps2 = gravity_mps2
 
     def _solve_pitch_rad_reese(self, horizontal_dist_m: float, height_m: float):
@@ -66,7 +71,6 @@ class Blaster:
             x = 0.000000000001
 
         y = height_m
-        print(x, y)
         velo = self.water_velocity_mps
         g = self.gravity_mps2
 
@@ -76,7 +80,6 @@ class Blaster:
 
         disc_before_squarerooted = B**2-4*A*C
         if disc_before_squarerooted<0:
-            print("messedup",disc_before_squarerooted)
             return None
 
         disc = math.sqrt(disc_before_squarerooted)
@@ -126,14 +129,12 @@ class Blaster:
 
         yaw_sign = -1 if self.yaw_invert else 1
         pitch_sign = -1 if self.pitch_invert else 1
-        yaw_servo_deg = self.yaw.center_angle_deg + yaw_sign * yaw_deg + self.yaw_zero_offset_deg
-        pitch_servo_deg = (
-            self.pitch.center_angle_deg + pitch_sign * pitch_deg + self.pitch_zero_offset_deg
-        )
+        yaw_frame_deg = yaw_sign * yaw_deg
+        pitch_frame_deg = pitch_sign * pitch_deg
 
         for name, servo, target_deg in (
-            ("yaw", self.yaw, yaw_servo_deg),
-            ("pitch", self.pitch, pitch_servo_deg),
+            ("yaw", self.yaw, yaw_frame_deg),
+            ("pitch", self.pitch, pitch_frame_deg),
         ):
             if not (servo.min_angle_deg <= target_deg <= servo.max_angle_deg):
                 raise ValueError(
@@ -141,15 +142,22 @@ class Blaster:
                     f"[{servo.min_angle_deg}, {servo.max_angle_deg}]"
                 )
 
-        self.yaw.setDegrees(yaw_servo_deg)
-        self.pitch.setDegrees(pitch_servo_deg)
-        return AimSolution(yaw_deg=yaw_servo_deg, pitch_deg=pitch_servo_deg)
+        self.yaw.setDegrees(yaw_frame_deg)
+        self.pitch.setDegrees(pitch_frame_deg)
+        return AimSolution(yaw_deg=yaw_frame_deg, pitch_deg=pitch_frame_deg)
 
     def water_on(self) -> None:
         self.solenoid.on()
 
     def water_off(self) -> None:
         self.solenoid.off()
+
+    def ready_aim_fire(self, x, y, z, high_arc=False, aim_dur_s=0.5, fire_dur_s=2.0):
+        print('aim!')
+        self.aim_at(x, y, z, high_arc)
+        time.sleep(aim_dur_s)
+        print('fire!')
+        self.fire(fire_dur_s)
 
     def fire(self, duration_s: float) -> None:
         """Open the solenoid for duration_s seconds, then close it."""

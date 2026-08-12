@@ -103,7 +103,7 @@ class FrameServo:
         return self.S.getDegrees() - self.zeroPointDegrees
 
     def center(self) -> None:
-        self.setDegrees(self.center_angle_deg)
+        self.setDegrees(0)
 
     def close(self) -> None:
         self.S.close()

@@ -114,28 +114,35 @@ def s5():
         using 15 meters per second for water speed
     '''
     blaster = Blaster(
-        yaw_servo_params=dict(gpio_pin=18, pwm_hz=50, min_pulse_us=500+100, max_pulse_us=2500-100, min_angle_deg=0, max_angle_deg=270),
-        pitch_servo_params=dict(gpio_pin=12, pwm_hz=50, min_pulse_us=500+100, max_pulse_us=2500-100, min_angle_deg=0, max_angle_deg=270),
+        yaw_servo_params=dict(gpio_pin=18, pwm_hz=80, min_pulse_us=500+100, max_pulse_us=2500-100, min_angle_deg=0, max_angle_deg=270),
+        pitch_servo_params=dict(gpio_pin=12, pwm_hz=80, min_pulse_us=500+100, max_pulse_us=2500-100, min_angle_deg=0, max_angle_deg=270),
         solenoid_gpio_pin=15,
-        water_velocity_mps=15,
-        pitch_invert=True,
+        water_velocity_mps=7,
+        pitch_invert=False, # servo goes up on positive angles - good
+        yaw_invert=True, # servo turns left on positive angles - need invert
+        yaw_zero_offset_deg=125,
+        pitch_zero_offset_deg=130,
     )
-    '''
+    if 1: # actual aiming of blaster
+        #print('aim:', blaster.aim_at(1, 1, -0.1))
+        blaster.center()
+        blaster.ready_aim_fire(1,1,1)
+        return
+
     print('aim:', blaster.aim_at(0, 0, 1))
     print('aim:', blaster.aim_at(0, 0, -1))
     print('aim:', blaster.aim_at(0, 0, 0))
-    print('aim:', blaster.aim_at(0, 10, 0, True))
-    print('aim:', blaster.aim_at(0, 10, 0, False))
-    print('aim:', blaster.aim_at(0, 10, -2, True))
-    print('aim:', blaster.aim_at(0, 10, -2, False))
-    '''
+    print('aim:', blaster.aim_at(0, 20, 0, True))
+    print('aim:', blaster.aim_at(0, 20, 0, False))
+    print('aim:', blaster.aim_at(0, 20, -2, True))
+    print('aim:', blaster.aim_at(0, 20, -2, False))
     blaster.aim_at(0,.1,0,False)
 
 def main():
-    #return s5() # 1st full blaster instantiation
+    #return s2() # blaster servo calibration to find 0,0 point (aim level straight ahead)
+    return s5() # 1st full blaster instantiation
     #return s4()
     #return s3()
-    return s2()
     return s1()
 
 if __name__ == "__main__":
