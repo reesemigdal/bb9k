@@ -7,7 +7,7 @@ from typing import NamedTuple
 
 from gpiozero import DigitalOutputDevice
 
-from .servo import Servo
+from .servo import Servo, FrameServo
 
 GRAVITY_MPS2 = 9.80665
 

@@ -65,7 +65,19 @@ def s1():
 
 def s2():
     ''' pwm test using the new servo class '''
-    S = Servo(12, 50, 500, 2500, 0, 270)
+
+    if 1: # set servos to "0" (ie 135 degrees) positions
+        s1 = Servo(12, 50, 500, 2500, 0, 270) # pitch
+        s2 = Servo(18, 50, 500, 2500, 0, 270) # yaw
+        s1.setDegrees(130)
+        s2.setDegrees(125)
+        time.sleep(5)
+        s1._pwm.echo(0, os.path.join(s1._pwm.pwm_dir, "enable"))
+        s2._pwm.echo(0, os.path.join(s2._pwm.pwm_dir, "enable"))
+        return
+
+    #S = Servo(12, 50, 500, 2500, 0, 270)
+    S = Servo(18, 50, 500, 2500, 0, 270)
 
     for x in range(11):
         S.setDegrees(x/10.0*270)
@@ -108,6 +120,7 @@ def s5():
         water_velocity_mps=15,
         pitch_invert=True,
     )
+    '''
     print('aim:', blaster.aim_at(0, 0, 1))
     print('aim:', blaster.aim_at(0, 0, -1))
     print('aim:', blaster.aim_at(0, 0, 0))
@@ -115,12 +128,13 @@ def s5():
     print('aim:', blaster.aim_at(0, 10, 0, False))
     print('aim:', blaster.aim_at(0, 10, -2, True))
     print('aim:', blaster.aim_at(0, 10, -2, False))
-
+    '''
+    blaster.aim_at(0,.1,0,False)
 
 def main():
-    return s5() # 1st full blaster instantiation
-    return s4()
-    return s3()
+    #return s5() # 1st full blaster instantiation
+    #return s4()
+    #return s3()
     return s2()
     return s1()
 

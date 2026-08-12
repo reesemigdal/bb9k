@@ -74,3 +74,42 @@ class Servo:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+def interp1(x, v, xq):
+    ''' linear interpolation between two points, as in matlab's interp1(x, v, xq).
+        x and v are 2-tuples: (x0, x1), (v0, v1).
+    '''
+    x0, x1 = x
+    v0, v1 = v
+    t = (xq - x0) / (x1 - x0)
+    return v0 + t * (v1 - v0)
+
+class FrameServo:
+    """A servo addressed in some other frame's coordinates, where frame degrees = 0
+    corresponds to zeroPointDegrees on the underlying servo S. Same api as Servo.
+    """
+
+    def __init__(self, S: Servo, zeroPointDegrees: float):
+        self.S = S
+        self.zeroPointDegrees = zeroPointDegrees
+        self.min_angle_deg = S.min_angle_deg - zeroPointDegrees
+        self.max_angle_deg = S.max_angle_deg - zeroPointDegrees
+        self.center_angle_deg = S.center_angle_deg - zeroPointDegrees
+
+    def setDegrees(self, degrees: float) -> None:
+        self.S.setDegrees(degrees + self.zeroPointDegrees)
+
+    def getDegrees(self) -> float:
+        return self.S.getDegrees() - self.zeroPointDegrees
+
+    def center(self) -> None:
+        self.setDegrees(self.center_angle_deg)
+
+    def close(self) -> None:
+        self.S.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
