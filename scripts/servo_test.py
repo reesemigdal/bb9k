@@ -126,7 +126,7 @@ def s5():
     if 1: # actual aiming of blaster
         #print('aim:', blaster.aim_at(1, 1, -0.1))
         blaster.center()
-        blaster.ready_aim_fire(1,1,1)
+        #blaster.ready_aim_fire(0.25, 2, 0.0)
         return
 
     print('aim:', blaster.aim_at(0, 0, 1))
