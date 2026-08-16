@@ -1,25 +1,56 @@
 import time
 
+import cv2
 import numpy as np
 from ultralytics import YOLO
-from ultralytics.utils import ASSETS
+from matplotlib import pyplot as plt
 
 
 def y1():
-    ''' load yolov8n and run detection on ultralytics' bundled sample image (bus.jpg)
-        confirms the model downloads, cv2 loads, and inference produces real detections
-        annotated result is saved next to this script
+    ''' load a local test image manually with opencv, run detection, and get the
+        raw model outputs (boxes) - no results.plot()/save(), boxes/labels are
+        drawn by hand and plotted manually to confirm the full pipeline works
     '''
-    model = YOLO('../data/yolov8n.pt')
-    results = model.predict(ASSETS / 'bus.jpg', verbose=True)
+    modelfn = '../data/yolov8n.pt'
+    imgfn = '../data/bus.jpg'
 
-    for box in results[0].boxes:
+    print('loading',modelfn)
+    model = YOLO(modelfn)
+
+    print('loading ',imgfn)
+    img = cv2.imread(imgfn)
+
+    n = 20
+    for imgsz in (640, 320):
+        times = []
+        for _ in range(n):
+            t0 = time.time()
+            results = model.predict(img, imgsz=imgsz, verbose=False)
+            times.append(time.time() - t0)
+        times.sort()
+        median = times[n // 2]
+        print(f'imgsz={imgsz}: {median*1000:.1f}ms/frame (median) -> {1/median:.1f} fps')
+
+    boxes = results[0].boxes  # last pass (imgsz=320)
+
+    for box in boxes:
+        x1, y1_, x2, y2 = map(int, box.xyxy[0])
         cls_name = model.names[int(box.cls)]
-        print(f'{cls_name}: conf={float(box.conf):.2f} xyxy={box.xyxy.tolist()[0]}')
+        label = f'{cls_name} {float(box.conf):.2f}'
+        print(f'{label} xyxy=({x1}, {y1_}, {x2}, {y2})')
+
+        cv2.rectangle(img, (x1, y1_), (x2, y2), (0, 255, 0), 2)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        cv2.rectangle(img, (x1, y1_ - th - 6), (x1 + tw, y1_), (0, 255, 0), -1)
+        cv2.putText(img, label, (x1, y1_ - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
     out_path = 'yolo_test_output.jpg'
-    results[0].save(out_path)
+    cv2.imwrite(out_path, img)
     print('annotated image saved to:', out_path)
+
+    plt.imshow(img[..., ::-1])  # bgr -> rgb
+    plt.axis('off')
+    plt.show()
 
 def y2():
     ''' benchmark cpu inference speed on a synthetic 640x480 frame
