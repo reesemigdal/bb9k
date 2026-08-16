@@ -1,6 +1,6 @@
 
 __pycache__
-data/
+*.pt
 scripts/yolo_test_output.jpg
 calib_out/
 
