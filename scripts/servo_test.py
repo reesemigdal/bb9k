@@ -177,8 +177,69 @@ def ground_plane1():
     }.items():
         print(f'{name} pixel ({u},{v}) -> ground XYZ (camera frame, m):', ground_xyz[v, u])
 
+def ground_squirt1(height_m, pitch_rad, roll_rad, calibfn):
+    ''' Live version of camera_view.py: shows the camera feed in a window,
+        and on left-click, maps the clicked pixel to a ground XYZ (via
+        GroundPlane, as in ground_plane1) and has the Blaster (params from
+        s5) ready_aim_fire at it. Press 'q' to quit.
+    '''
+    import cv2
+    from picamera2 import Picamera2
+
+    with open(calibfn) as f:
+        calib = yaml.safe_load(f)
+    camera_matrix = np.array(calib['camera_matrix'])
+    dist_coeffs = np.array(calib['dist_coeffs'])
+    width, img_height = calib['image_width'], calib['image_height']
+
+    ground = GroundPlane(height_m, pitch_rad, roll_rad)
+
+    blaster = Blaster(
+        yaw_servo_params=dict(gpio_pin=18, pwm_hz=80, min_pulse_us=500+100, max_pulse_us=2500-100, min_angle_deg=0, max_angle_deg=270),
+        pitch_servo_params=dict(gpio_pin=12, pwm_hz=80, min_pulse_us=500+100, max_pulse_us=2500-100, min_angle_deg=0, max_angle_deg=270),
+        solenoid_gpio_pin=15,
+        water_velocity_mps=7,
+        pitch_invert=False, # servo goes up on positive angles - good
+        yaw_invert=True, # servo turns left on positive angles - need invert
+        yaw_zero_offset_deg=125,
+        pitch_zero_offset_deg=130,
+    )
+
+    def on_click(event, u, v, flags, userdata):
+        if event != cv2.EVENT_LBUTTONDOWN:
+            return
+        x, y, z = ground.pixel_to_ground(u, v, camera_matrix, dist_coeffs)
+        if np.isnan(x):
+            print(f'pixel ({u},{v}) is above the horizon, no ground point to shoot')
+            return
+        print(f'pixel ({u},{v}) -> ground XYZ (m): ({x:.2f}, {y:.2f}, {z:.2f})')
+        try:
+            blaster.ready_aim_fire(x, y, z)
+        except ValueError as e:
+            print(f'  cannot aim there: {e}')
+
+    picam2 = Picamera2()
+    config = picam2.create_video_configuration(main={"size": (width, img_height), "format": "RGB888"})
+    picam2.configure(config)
+    picam2.start()
+
+    window_name = 'Ground Squirt'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback(window_name, on_click)
+
+    try:
+        while True:
+            frame = picam2.capture_array()
+            cv2.imshow(window_name, frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+    finally:
+        picam2.stop()
+        cv2.destroyAllWindows()
+        blaster.close()
 
 def main():
+    return ground_squirt1(ft2m(6), d2r(0), d2r(0), '../data/camera_calib.yaml') # tie ground plane into gun, with gui
     return ground_plane1() # ground plane estimation using height and pitch, camera intrinsics
     #return s2() # blaster servo calibration to find 0,0 point (aim level straight ahead)
     return s5() # 1st full blaster instantiation
