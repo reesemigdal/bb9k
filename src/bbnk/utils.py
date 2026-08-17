@@ -2,6 +2,7 @@
 """Unit conversion helpers."""
 
 import math
+import numpy as np
 
 M_PER_IN = 0.0254
 M_PER_FT = 0.3048
@@ -21,3 +22,6 @@ def d2r(degrees: float) -> float:
 
 def r2d(radians: float) -> float:
     return math.degrees(radians)
+
+def np2PrettyStr(d):
+    return '%s (%s): %s %s'%(d.shape, d.dtype, np.min(d), np.max(d))

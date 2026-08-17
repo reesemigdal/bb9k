@@ -8,7 +8,7 @@ sys.path.append('../src')
 from bbnk.servo import Servo
 from bbnk.blaster import Blaster
 from bbnk.ground import GroundPlane
-from bbnk.utils import d2r, ft2m
+from bbnk.utils import d2r, ft2m, np2PrettyStr
 
 
 def s1():
@@ -159,13 +159,15 @@ def ground_plane1():
     with open(calibfn) as f:
         calib = yaml.safe_load(f)
     camera_matrix = np.array(calib['camera_matrix'])
+    dist_coeffs = np.array(calib['dist_coeffs'])
     width, img_height = calib['image_width'], calib['image_height']
 
     ground = GroundPlane(h, pitch, roll)
     print('down_cam (straight-down direction, in camera frame):', ground.down_cam)
     print('ground plane, in camera coords: down_cam . P = h =', h)
 
-    ground_xyz = ground.image_to_ground(camera_matrix, width, img_height)
+    ground_xyz = ground.image_to_ground(camera_matrix, width, img_height, dist_coeffs)
+    print('ground_xyz',np2PrettyStr(ground_xyz))
 
     print('ground_xyz shape:', ground_xyz.shape)
     for name, (u, v) in {
@@ -174,8 +176,6 @@ def ground_plane1():
         'top-center': (width // 2, 0),
     }.items():
         print(f'{name} pixel ({u},{v}) -> ground XYZ (camera frame, m):', ground_xyz[v, u])
-
-    return ground_xyz
 
 
 def main():
