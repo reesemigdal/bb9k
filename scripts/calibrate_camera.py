@@ -78,7 +78,7 @@ def per_image_reprojection_errors(obj_points_list, img_points_list, rvecs, tvecs
     errors = []
     for objp, imgp, rvec, tvec in zip(obj_points_list, img_points_list, rvecs, tvecs):
         projected, _ = cv2.projectPoints(objp, rvec, tvec, camera_matrix, dist_coeffs)
-        error = cv2.norm(imgp, projected.reshape(-1, 2), cv2.NORM_L2) / len(projected)
+        error = cv2.norm(imgp, projected.reshape(-1, 2), cv2.NORM_L2) / np.sqrt(len(projected))
         errors.append(error)
     return errors
 

@@ -1,0 +1,58 @@
+image_width: 2592
+image_height: 1944
+board_squares_x: 8
+board_squares_y: 11
+square_size_mm: 20.0
+marker_size_mm: 15.0
+aruco_dict: DICT_5X5_250
+camera_matrix:
+- - 1697.9309020588632
+  - 0.0
+  - 1339.3366849388678
+- - 0.0
+  - 1688.3766890042314
+  - 889.2973736866744
+- - 0.0
+  - 0.0
+  - 1.0
+dist_coeffs:
+- -0.35071143762083756
+- 0.1506568933611089
+- -0.00019827912422927828
+- -0.0004062867048240287
+- -0.03360354110591954
+rms_reprojection_error: 1.1179247070687166
+num_images_used: 32
+images_used:
+- calib_001.png
+- calib_002.png
+- calib_003.png
+- calib_004.png
+- calib_005.png
+- calib_006.png
+- calib_007.png
+- calib_008.png
+- calib_009.png
+- calib_010.png
+- calib_011.png
+- calib_012.png
+- calib_013.png
+- calib_014.png
+- calib_015.png
+- calib_016.png
+- calib_017.png
+- calib_018.png
+- calib_019.png
+- calib_020.png
+- calib_021.png
+- calib_022.png
+- calib_023.png
+- calib_024.png
+- calib_025.png
+- calib_026.png
+- calib_027.png
+- calib_028.png
+- calib_029.png
+- calib_030.png
+- calib_031.png
+- calib_032.png
