@@ -8,6 +8,7 @@ from typing import NamedTuple
 from gpiozero import DigitalOutputDevice
 
 from .servo import Servo, FrameServo
+from .utils import d2r, r2d
 
 GRAVITY_MPS2 = 9.80665
 
@@ -91,7 +92,7 @@ class Blaster:
     def _solve_pitch_rad_old(self, horizontal_dist_m: float, height_m: float):
         """Return (low_arc_rad, high_arc_rad) launch angles, or None if unreachable."""
         if horizontal_dist_m < 1e-9:
-            theta = math.pi / 2 if height_m >= 0 else -math.pi / 2
+            theta = d2r(90) if height_m >= 0 else d2r(-90)
             return theta, theta
 
         g = self.gravity_mps2
@@ -115,7 +116,7 @@ class Blaster:
         Raises ValueError if the target is out of ballistic range (given
         water_velocity_mps) or outside the mechanical range of either servo.
         """
-        yaw_deg = math.degrees(math.atan2(x, y))
+        yaw_deg = r2d(math.atan2(x, y))
 
         #solutions = self._solve_pitch_rad(math.hypot(x, y), z)
         solutions = self._solve_pitch_rad_reese(math.hypot(x, y), z)
@@ -125,7 +126,7 @@ class Blaster:
                 f"{self.water_velocity_mps} m/s water velocity"
             )
         theta_low, theta_high = solutions
-        pitch_deg = math.degrees(theta_high if prefer_high_arc else theta_low)
+        pitch_deg = r2d(theta_high if prefer_high_arc else theta_low)
 
         yaw_sign = -1 if self.yaw_invert else 1
         pitch_sign = -1 if self.pitch_invert else 1

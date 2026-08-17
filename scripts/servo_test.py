@@ -1,9 +1,14 @@
 import os,sys,time
+
+import numpy as np
+import yaml
 from rpi_hardware_pwm import HardwarePWM
 
 sys.path.append('../src')
 from bbnk.servo import Servo
 from bbnk.blaster import Blaster
+from bbnk.ground import GroundPlane
+from bbnk.utils import d2r, ft2m
 
 
 def s1():
@@ -138,7 +143,43 @@ def s5():
     print('aim:', blaster.aim_at(0, 20, -2, False))
     blaster.aim_at(0,.1,0,False)
 
+def ground_plane1():
+    ''' Map every pixel of the camera's image to a physical (X, Y, Z) ground
+        point, in the camera's own frame (X=right, Y=forward, Z=up, origin
+        at the camera) - the same convention aim_at() uses (modulo the
+        pivot-vs-camera-center offset, left for later). The actual geometry
+        lives in bbnk.ground.GroundPlane; this just loads the calibration
+        and hands it plain numbers.
+    '''
+    h = ft2m(6)    # heigh the camera is above the ground
+    pitch = d2r(0) # looking straight ahead, horiztonally
+    roll = d2r(0) # camera is level and not rotated
+    calibfn = '../data/camera_calib.yaml'
+
+    with open(calibfn) as f:
+        calib = yaml.safe_load(f)
+    camera_matrix = np.array(calib['camera_matrix'])
+    width, img_height = calib['image_width'], calib['image_height']
+
+    ground = GroundPlane(h, pitch, roll)
+    print('down_cam (straight-down direction, in camera frame):', ground.down_cam)
+    print('ground plane, in camera coords: down_cam . P = h =', h)
+
+    ground_xyz = ground.image_to_ground(camera_matrix, width, img_height)
+
+    print('ground_xyz shape:', ground_xyz.shape)
+    for name, (u, v) in {
+        'center': (width // 2, img_height // 2),
+        'bottom-center': (width // 2, img_height - 1),
+        'top-center': (width // 2, 0),
+    }.items():
+        print(f'{name} pixel ({u},{v}) -> ground XYZ (camera frame, m):', ground_xyz[v, u])
+
+    return ground_xyz
+
+
 def main():
+    return ground_plane1() # ground plane estimation using height and pitch, camera intrinsics
     #return s2() # blaster servo calibration to find 0,0 point (aim level straight ahead)
     return s5() # 1st full blaster instantiation
     #return s4()
