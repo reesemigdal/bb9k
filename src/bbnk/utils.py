@@ -25,3 +25,40 @@ def r2d(radians: float) -> float:
 
 def np2PrettyStr(d):
     return '%s (%s): %s %s'%(d.shape, d.dtype, np.min(d), np.max(d))
+
+
+def invert_transform(T_a2b):
+    """Invert a 4x4 homogeneous coordinate transform.
+
+    T_a2b maps frame-A coordinates to frame-B coordinates
+    ([P_b;1] = T_a2b @ [P_a;1]); returns T_b2a. Plain matrix inversion -
+    works for any invertible 4x4, not just rigid transforms.
+    """
+    return np.linalg.inv(np.asarray(T_a2b, dtype=float))
+
+
+def compose_transform(T_a2b, T_b2c):
+    """Compose two coordinate transforms into one: A -> B -> C becomes A -> C.
+
+    Given T_a2b (A -> B) and T_b2c (B -> C), returns T_a2c such that
+    [P_c;1] = T_a2c @ [P_a;1] for any point P. Since
+    [P_c;1] = T_b2c @ (T_a2b @ [P_a;1]) = (T_b2c @ T_a2b) @ [P_a;1],
+    this is just T_b2c @ T_a2b - mind the reversed order.
+    """
+    return np.asarray(T_b2c, dtype=float) @ np.asarray(T_a2b, dtype=float)
+
+
+def apply_transform(T_a2b, points_a):
+    """Apply a 4x4 homogeneous transform to one or more 3-vectors.
+
+    points_a: array-like, shape (..., 3), frame-A coordinates. Returns an
+    ndarray of the same shape (..., 3), dtype float64: each point
+    transformed into frame B (implicit w=1, re-normalized by w on the way
+    out so affine/projective T_a2b also work).
+    """
+    T_a2b = np.asarray(T_a2b, dtype=float)
+    points_a = np.asarray(points_a, dtype=float)
+    ones = np.ones(points_a.shape[:-1] + (1,))
+    homogeneous_a = np.concatenate([points_a, ones], axis=-1)
+    homogeneous_b = homogeneous_a @ T_a2b.T
+    return homogeneous_b[..., :3] / homogeneous_b[..., 3:4]

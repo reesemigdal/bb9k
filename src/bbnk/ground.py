@@ -9,6 +9,8 @@ Blaster.aim_at() uses (modulo the pivot-vs-camera-center offset).
 import cv2
 import numpy as np
 
+from .utils import apply_transform, invert_transform
+
 
 def pixel_ray(u, v, camera_matrix, dist_coeffs=None):
     """Unnormalized camera-frame ray direction through pixel (u, v).
@@ -59,16 +61,64 @@ def image_rays(camera_matrix, width, height, dist_coeffs=None):
     return pixel_ray(us, vs, camera_matrix, dist_coeffs)
 
 
+def world_to_camera_transform(height_m: float, pitch_rad: float = 0.0, roll_rad: float = 0.0):
+    """Build T_w2c: the 4x4 homogeneous transform, world frame -> camera frame.
+
+    World frame: the ground itself. Gravity-aligned, origin on the ground
+    directly below the camera - X=right, Y=ahead, Z=up, same convention as
+    the camera's own axes when level. Camera frame: origin at the camera,
+    X=right, Y=ahead, Z=up in the camera's own (possibly tilted) axes.
+    Camera (0, 0, -height_m) is world (0, 0, 0).
+
+    height_m: how high the camera sits above the world origin, i.e. the
+        camera's own position is world (0, 0, height_m).
+    pitch_rad: rotation of the camera frame about its local X (right) axis
+        relative to world, positive tilting Y (ahead) down toward -Z.
+    roll_rad: rotation of the camera frame about its local Y (ahead) axis
+        relative to world, i.e. about the camera's own viewing direction.
+    pitch=roll=0 means the camera frame is world-aligned, just translated
+    height_m up along Z.
+
+    Returns an ndarray, shape (4, 4), dtype float64: T_w2c, such that for a
+    world-frame point P_w, [P_c; 1] == T_w2c @ [P_w; 1] gives its
+    camera-frame coordinates P_c (utils.apply_transform does this for you,
+    including on a batch of points).
+    """
+    cp, sp = np.cos(pitch_rad), np.sin(pitch_rad)
+    cr, sr = np.cos(roll_rad), np.sin(roll_rad)
+
+    # R_c2w maps a direction given in the camera's own axes to what that
+    # same physical direction would be if the camera were level (i.e. to
+    # world axes); its transpose is the rotation part of T_w2c.
+    R_pitch = np.array([[1, 0, 0],
+                         [0, cp, sp],
+                         [0, -sp, cp]])
+    R_roll = np.array([[cr, 0, sr],
+                        [0, 1, 0],
+                        [-sr, 0, cr]])
+    R_c2w = R_pitch @ R_roll
+    R_w2c = R_c2w.T
+
+    T_w2c = np.eye(4)
+    T_w2c[:3, :3] = R_w2c
+    T_w2c[:3, 3] = R_w2c @ np.array([0.0, 0.0, -height_m])
+    return T_w2c
+
+
 class GroundPlane:
-    """The ground plane, expressed in a (possibly tilted) camera's own frame.
+    """The physical ground - the world coordinate system - and its
+    relationship to a (possibly tilted) camera sitting above it.
+
+    World frame: gravity-aligned, origin on the ground directly below the
+    camera - X=right, Y=ahead, Z=up. The ground plane is exactly the world
+    Z=0 plane. Camera frame: origin at the camera, X=right, Y=ahead, Z=up
+    in the camera's own axes; camera (0, 0, -height_m) is world (0, 0, 0).
 
     height_m: how high the camera sits above the ground.
-    pitch_rad: rotation about the camera's local X (right) axis, positive
-        tilting Y (ahead) down toward -Z (the ground).
-    roll_rad: rotation about the camera's local Y (ahead) axis, i.e. about
-        its own viewing direction.
-    pitch=roll=0 means the camera is level, looking straight ahead - in
-    which case its own axes are gravity-aligned by definition.
+    pitch_rad, roll_rad: rotation of the camera frame relative to world -
+        see world_to_camera_transform for the exact sign conventions.
+    pitch=roll=0 means the camera is level - world and camera axes then
+    differ only by the height_m translation.
 
     In camera coordinates the ground plane is the set of points P
     satisfying down_cam . P == height_m.
@@ -76,6 +126,10 @@ class GroundPlane:
     Attributes:
         height_m, pitch_rad, roll_rad: the constructor args, stored as-is
             (Python floats).
+        T_w2c: ndarray, shape (4, 4), dtype float64. Homogeneous transform,
+            world -> camera (see world_to_camera_transform).
+        T_c2w: ndarray, shape (4, 4), dtype float64. Homogeneous transform,
+            camera -> world; T_w2c's inverse.
         down_cam: ndarray, shape (3,), dtype float64. Unit vector: the
             physical "straight down" direction, expressed in the camera's
             own (right, ahead, up) axes.
@@ -86,22 +140,33 @@ class GroundPlane:
         self.pitch_rad = pitch_rad
         self.roll_rad = roll_rad
 
-        cp, sp = np.cos(pitch_rad), np.sin(pitch_rad)
-        cr, sr = np.cos(roll_rad), np.sin(roll_rad)
+        self.T_w2c = world_to_camera_transform(height_m, pitch_rad, roll_rad)
+        self.T_c2w = invert_transform(self.T_w2c)
+        # World "straight down" ((0,0,-1), gravity's direction) re-expressed
+        # in the camera's own axes - a direction, not a point, so only the
+        # rotation block applies (apply_transform would also add T_w2c's
+        # translation). E.g. pitch=roll=0: camera axes == world axes, so
+        # down_cam == (0,0,-1) exactly, and the ground plane sits height_m
+        # below the camera along that axis, i.e. down_cam . (0,0,-height_m)
+        # == height_m.
+        self.down_cam = self.T_w2c[:3, :3] @ np.array([0.0, 0.0, -1.0])
 
-        # R_tilt maps a direction given in the camera's own axes to what
-        # that same physical direction would be if the camera were level;
-        # its transpose (inverse) re-expresses a gravity-aligned direction
-        # in the camera's own, actually-tilted axes.
-        R_pitch = np.array([[1, 0, 0],
-                             [0, cp, sp],
-                             [0, -sp, cp]])
-        R_roll = np.array([[cr, 0, sr],
-                            [0, 1, 0],
-                            [-sr, 0, cr]])
-        R_tilt = R_pitch @ R_roll
+    def to_camera(self, points_world):
+        """World-frame point(s) -> camera-frame point(s).
 
-        self.down_cam = R_tilt.T @ np.array([0.0, 0.0, -1.0])
+        points_world: array-like, shape (..., 3). Returns an ndarray of the
+        same shape (..., 3), dtype float64.
+        """
+        return apply_transform(self.T_w2c, points_world)
+
+    def to_world(self, points_cam):
+        """Camera-frame point(s) -> world-frame point(s).
+
+        points_cam: array-like, shape (..., 3). Returns an ndarray of the
+        same shape (..., 3), dtype float64. Ground points (from intersect/
+        pixel_to_ground/image_to_ground) land on world Z == 0.
+        """
+        return apply_transform(self.T_c2w, points_cam)
 
     def intersect(self, ray_dirs):
         """Intersect camera-frame ray direction(s) with the ground plane.
