@@ -176,6 +176,7 @@ def ground_plane1():
         'top-center': (width // 2, 0),
     }.items():
         print(f'{name} pixel ({u},{v}) -> ground XYZ (camera frame, m):', ground_xyz[v, u])
+        print('   -> world frame,m:   ',ground.to_world(ground_xyz[v,u]))
 
 def ground_squirt1(height_m, pitch_rad, roll_rad, calibfn):
     ''' Live version of camera_view.py: shows the camera feed in a window,
@@ -208,11 +209,15 @@ def ground_squirt1(height_m, pitch_rad, roll_rad, calibfn):
     def on_click(event, u, v, flags, userdata):
         if event != cv2.EVENT_LBUTTONDOWN:
             return
-        x, y, z = ground.pixel_to_ground(u, v, camera_matrix, dist_coeffs)
-        if np.isnan(x):
+        ground_cam = ground.pixel_to_ground(u, v, camera_matrix, dist_coeffs)
+        if np.isnan(ground_cam[0]):
             print(f'pixel ({u},{v}) is above the horizon, no ground point to shoot')
             return
-        print(f'pixel ({u},{v}) -> ground XYZ (m): ({x:.2f}, {y:.2f}, {z:.2f})')
+        world_xyz = ground.to_world(ground_cam)
+        print(f'pixel ({u},{v}) -> world XYZ (m): ({world_xyz[0]:.2f}, {world_xyz[1]:.2f}, {world_xyz[2]:.2f})')
+        # aim_at/ready_aim_fire want camera-frame coords (standing in for
+        # turret-frame until T_c2t is defined - see GroundPlane.to_camera).
+        x, y, z = ground.to_camera(world_xyz)
         try:
             blaster.ready_aim_fire(x, y, z)
         except ValueError as e:
@@ -239,7 +244,7 @@ def ground_squirt1(height_m, pitch_rad, roll_rad, calibfn):
         blaster.close()
 
 def main():
-    return ground_squirt1(ft2m(6), d2r(0), d2r(0), '../data/camera_calib.yaml') # tie ground plane into gun, with gui
+    # return ground_squirt1(ft2m(6), d2r(0), d2r(0), '../data/camera_calib.yaml') # tie ground plane into gun, with gui
     return ground_plane1() # ground plane estimation using height and pitch, camera intrinsics
     #return s2() # blaster servo calibration to find 0,0 point (aim level straight ahead)
     return s5() # 1st full blaster instantiation
