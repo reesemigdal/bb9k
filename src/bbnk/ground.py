@@ -79,6 +79,9 @@ def world_to_camera_transform(height_m: float, pitch_rad: float = 0.0, roll_rad:
     pitch=roll=0 means the camera frame is world-aligned, just translated
     height_m up along Z.
 
+    We don't specify yaw because the world frame is always yaw-aligned with
+    camera, hence yaw is by definition 0.
+
     Returns an ndarray, shape (4, 4), dtype float64: T_w2c, such that for a
     world-frame point P_w, [P_c; 1] == T_w2c @ [P_w; 1] gives its
     camera-frame coordinates P_c (utils.apply_transform does this for you,
