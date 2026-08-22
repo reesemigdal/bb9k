@@ -110,6 +110,31 @@ class Blaster:
         """Whether (x, y, z) can be hit at the configured water velocity."""
         return self._solve_pitch_rad_reese(math.hypot(x, y), z) is not None
 
+    def max_horizontal_range_m(self, target_z_m: float, search_bound_m: float = 200.0, tol_m: float = 0.01) -> float:
+        """Max horizontal distance reachable at a fixed target height offset.
+
+        target_z_m: target height relative to the blaster's pivot (world/
+            turret Z, positive up) - e.g. for a ground point seen through
+            GroundPlane, that's -height_m (see GroundPlane.max_range_points).
+
+        Binary search over is_reachable(), which is monotonic in horizontal
+        distance for a fixed target_z_m (reachability only ever gets harder
+        as range grows, for a fixed drop). Raises ValueError if
+        search_bound_m is itself reachable (too small a bound to bracket
+        the true max range) - widen it.
+        """
+        if self.is_reachable(search_bound_m, 0.0, target_z_m):
+            raise ValueError(f'search_bound_m={search_bound_m} is itself reachable; increase it')
+
+        lo, hi = 0.0, search_bound_m
+        while hi - lo > tol_m:
+            mid = (lo + hi) / 2
+            if self.is_reachable(mid, 0.0, target_z_m):
+                lo = mid
+            else:
+                hi = mid
+        return lo
+
     def aim_at(self, x: float, y: float, z: float, prefer_high_arc: bool = False) -> AimSolution:
         """Point yaw/pitch servos to hit world point (x, y, z).
 

@@ -190,6 +190,80 @@ class GroundPlane:
             t = np.where(denom > 1e-9, self.height_m / denom, np.nan)
         return ray_dirs * t[..., np.newaxis]
 
+    def horizon_points(self, camera_matrix, width, dist_coeffs=None, n=64, margin=1.5):
+        """Sample points along the horizon line, in raw (distorted) pixel coordinates.
+
+        The horizon is exactly the denom == 0 boundary from intersect() (a
+        ray running dead parallel to the ground, down_cam . ray_dir == 0)
+        - the same condition that makes pixel_to_ground/image_to_ground
+        return nan. In undistorted normalized image coordinates that
+        boundary is a straight line (the ahead=1 slice of the plane
+        through the camera origin with normal down_cam), so it's built
+        there and then run through cv2.projectPoints with dist_coeffs to
+        see how the real lens bends it.
+
+        camera_matrix, dist_coeffs: as elsewhere (dist_coeffs=None for
+            none).
+        width: image width in pixels - used to pick an x-range wide enough
+            to span the image; `margin` extends that range further, since
+            a rolled camera's horizon needn't stay within the undistorted
+            x-range of a level one.
+        n: number of points to sample along the line.
+
+        Returns an ndarray, shape (n, 2), dtype float64: (u, v) raw pixel
+        coordinates, sorted left to right, suitable for cv2.polylines.
+        """
+        if self.down_cam[2] == 0:
+            raise ZeroDivisionError('camera is rolled exactly on its side - horizon is a vertical line')
+
+        camera_matrix = np.asarray(camera_matrix, dtype=float)
+        fx, cx = camera_matrix[0, 0], camera_matrix[0, 2]
+        xn = np.linspace(-margin * cx / fx, margin * (width - cx) / fx, n)
+        yn = (xn * self.down_cam[0] + self.down_cam[1]) / self.down_cam[2]
+
+        points_cam = np.stack([xn, yn, np.ones_like(xn)], axis=-1)  # OpenCV (X, Y, Z=1)
+        dist = np.asarray(dist_coeffs, dtype=float) if dist_coeffs is not None else None
+        pixels, _ = cv2.projectPoints(points_cam, np.zeros(3), np.zeros(3), camera_matrix, dist)
+        return pixels.reshape(-1, 2)
+
+    def max_range_points(self, camera_matrix, width, max_range_m, dist_coeffs=None, n=64, margin=1.5):
+        """Sample points along the "can-hit" line: ground pixels exactly max_range_m away.
+
+        Ground points between this line and the horizon are on the ground
+        plane but farther than max_range_m (straight-line distance from the
+        camera/turret) - out of range even though they're visible and
+        below the horizon. Get max_range_m from Blaster.max_horizontal_range_m()
+        (using this GroundPlane's height_m as the target's height offset,
+        negated, since intersect() ground points sit height_m below the
+        camera).
+
+        Same construction as horizon_points(), generalized: instead of
+        solving where intersect()'s denom is exactly 0 (the horizon),
+        solve where its ground point has hypot(X, Y) == max_range_m. Since
+        ray_dir = (xn, 1, -yn) always has an "ahead" component of 1 (see
+        pixel_ray) and intersect()'s t = height_m / denom scales ray_dir
+        into the ground point, hypot(X, Y) == max_range_m works out to
+        denom == height_m * hypot(xn, 1) / max_range_m.
+
+        camera_matrix, dist_coeffs, width, n, margin: as in horizon_points().
+
+        Returns an ndarray, shape (n, 2), dtype float64: (u, v) raw pixel
+        coordinates, sorted left to right, suitable for cv2.polylines.
+        """
+        if self.down_cam[2] == 0:
+            raise ZeroDivisionError('camera is rolled exactly on its side - horizon is a vertical line')
+
+        camera_matrix = np.asarray(camera_matrix, dtype=float)
+        fx, cx = camera_matrix[0, 0], camera_matrix[0, 2]
+        xn = np.linspace(-margin * cx / fx, margin * (width - cx) / fx, n)
+        denom = self.height_m * np.hypot(xn, 1.0) / max_range_m
+        yn = (xn * self.down_cam[0] + self.down_cam[1] - denom) / self.down_cam[2]
+
+        points_cam = np.stack([xn, yn, np.ones_like(xn)], axis=-1)  # OpenCV (X, Y, Z=1)
+        dist = np.asarray(dist_coeffs, dtype=float) if dist_coeffs is not None else None
+        pixels, _ = cv2.projectPoints(points_cam, np.zeros(3), np.zeros(3), camera_matrix, dist)
+        return pixels.reshape(-1, 2)
+
     def pixel_to_ground(self, u, v, camera_matrix, dist_coeffs=None):
         """Camera-frame (X, Y, Z) ground point under pixel (u, v).
 

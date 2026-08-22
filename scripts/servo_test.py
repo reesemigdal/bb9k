@@ -130,8 +130,8 @@ def s5():
     )
     if 1: # actual aiming of blaster
         #print('aim:', blaster.aim_at(1, 1, -0.1))
-        blaster.center()
-        #blaster.ready_aim_fire(0.25, 2, 0.0)
+        #blaster.center()
+        blaster.ready_aim_fire(0.25, 2, 0.0)
         return
 
     print('aim:', blaster.aim_at(0, 0, 1))
@@ -194,6 +194,7 @@ def ground_squirt1(height_m, pitch_rad, roll_rad, calibfn):
     width, img_height = calib['image_width'], calib['image_height']
 
     ground = GroundPlane(height_m, pitch_rad, roll_rad)
+    horizon_pts = ground.horizon_points(camera_matrix, width, dist_coeffs).astype(np.int32)
 
     blaster = Blaster(
         yaw_servo_params=dict(gpio_pin=18, pwm_hz=80, min_pulse_us=500+100, max_pulse_us=2500-100, min_angle_deg=0, max_angle_deg=270),
@@ -205,6 +206,8 @@ def ground_squirt1(height_m, pitch_rad, roll_rad, calibfn):
         yaw_zero_offset_deg=125,
         pitch_zero_offset_deg=130,
     )
+    max_range_m = blaster.max_horizontal_range_m(-height_m)
+    can_hit_pts = ground.max_range_points(camera_matrix, width, max_range_m, dist_coeffs).astype(np.int32)
 
     def on_click(event, u, v, flags, userdata):
         if event != cv2.EVENT_LBUTTONDOWN:
@@ -235,6 +238,8 @@ def ground_squirt1(height_m, pitch_rad, roll_rad, calibfn):
     try:
         while True:
             frame = picam2.capture_array()
+            cv2.polylines(frame, [horizon_pts], isClosed=False, color=(0, 255, 255), thickness=2)
+            cv2.polylines(frame, [can_hit_pts], isClosed=False, color=(0, 0, 255), thickness=2)
             cv2.imshow(window_name, frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -244,10 +249,10 @@ def ground_squirt1(height_m, pitch_rad, roll_rad, calibfn):
         blaster.close()
 
 def main():
-    # return ground_squirt1(ft2m(6), d2r(0), d2r(0), '../data/camera_calib.yaml') # tie ground plane into gun, with gui
+    return ground_squirt1(ft2m(6), d2r(0), d2r(0), '../data/camera_calib.yaml') # tie ground plane into gun, with gui
+    return s5() # 1st full blaster instantiation
     return ground_plane1() # ground plane estimation using height and pitch, camera intrinsics
     #return s2() # blaster servo calibration to find 0,0 point (aim level straight ahead)
-    return s5() # 1st full blaster instantiation
     #return s4()
     #return s3()
     return s1()
