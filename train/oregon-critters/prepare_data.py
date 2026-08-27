@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Convert the Caltech Camera Traps COCO json into a YOLO-ready dataset.
+"""Convert the Oregon Critters COCO json into a YOLO-ready dataset.
 
-Reads caltech_bboxes_20200316_filtered_20k_animal_yolo.json (see
-train/caltech/README.md for how that json was built) and writes, all
+Reads oregon_critters_filtered_20k_animal_yolo.json (see
+train/oregon-critters/README.md for how that json was built) and writes, all
 directly under DATA_DIR (as siblings of images/), using only relative paths
 so the whole directory stays portable if it's ever moved or synced elsewhere:
   - labels/*.txt          YOLO-format labels, one per image, via convert_coco()
@@ -20,6 +20,15 @@ at train time. data.yaml omits `path:`, which defaults to its own directory
 for the same reason. Images are already flat in DATA_DIR/images/ and are
 left untouched; the train/val split is expressed as file lists rather than
 by moving images around.
+
+Unlike Caltech, this dataset intentionally includes background images (human
+sightings with their box stripped by collapse_categories.py, so zero
+"animal" annotations remain). convert_coco() only ever writes a label file
+for images that have at least one annotation, so after it runs we explicitly
+write an empty *.txt for every such image — otherwise Ultralytics still
+trains on them correctly (a missing label file is treated the same as an
+empty one), but reports them as "missing" instead of "background" in its
+scan summary, which looks like a bug when it isn't one.
 """
 import argparse
 import json
@@ -29,8 +38,8 @@ from pathlib import Path
 
 from ultralytics.data.converter import convert_coco
 
-DATA_DIR = Path.home() / "data/bb9k/caltech-camera-traps"
-SRC_JSON = DATA_DIR / "caltech_bboxes_20200316_filtered_20k_animal_yolo.json"
+DATA_DIR = Path.home() / "data/bb9k/oregon-critters"
+SRC_JSON = DATA_DIR / "oregon_critters_filtered_20k_animal_yolo.json"
 IMAGES_DIR = DATA_DIR / "images"
 LABELS_DIR = DATA_DIR / "labels"
 
@@ -71,7 +80,14 @@ def main():
         shutil.rmtree(LABELS_DIR)
     shutil.move(str(convert_dir / "out" / "labels" / "all"), str(LABELS_DIR))
     shutil.rmtree(convert_dir)
-    print(f"wrote {len(list(LABELS_DIR.glob('*.txt')))} label files to {LABELS_DIR}")
+
+    background_count = 0
+    for im in images:
+        label_path = (LABELS_DIR / im["file_name"]).with_suffix(".txt")
+        if not label_path.exists():
+            label_path.touch()
+            background_count += 1
+    print(f"wrote {len(list(LABELS_DIR.glob('*.txt')))} label files to {LABELS_DIR} ({background_count} background)")
 
     rng = random.Random(args.seed)
     file_names = [im["file_name"] for im in images]
