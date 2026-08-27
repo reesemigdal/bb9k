@@ -1,6 +1,7 @@
-
+.venv
 __pycache__
 *.pt
 scripts/yolo_test_output.jpg
 calib_out/
+train/runs/
 
