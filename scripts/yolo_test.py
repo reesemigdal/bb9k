@@ -11,17 +11,20 @@ def y1():
         raw model outputs (boxes) - no results.plot()/save(), boxes/labels are
         drawn by hand and plotted manually to confirm the full pipeline works
     '''
-    modelfn = '../data/yolov8n.pt'
+    modelfn = '../data/bundet.pt'
     imgfn = '../data/bus.jpg'
+    imgfn = '../data/bunny2.webp'
 
     print('loading',modelfn)
     model = YOLO(modelfn)
 
     print('loading ',imgfn)
     img = cv2.imread(imgfn)
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
-    n = 20
-    for imgsz in (640, 320):
+    n = 1
+    for imgsz in (640, ):
         times = []
         for _ in range(n):
             t0 = time.time()
