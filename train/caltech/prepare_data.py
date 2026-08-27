@@ -48,6 +48,8 @@ def main():
     missing = len(data["images"]) - len(images)
     if missing:
         print(f"warning: {missing} images listed in json are missing on disk, skipping them")
+    image_ids = {im["id"] for im in images}
+    annotations = [a for a in data["annotations"] if a["image_id"] in image_ids]
 
     convert_dir = DATA_DIR / "_convert_coco_tmp"
     if convert_dir.exists():
@@ -55,7 +57,7 @@ def main():
     ann_dir = convert_dir / "annotations"
     ann_dir.mkdir(parents=True)
     with open(ann_dir / "instances_all.json", "w") as f:
-        json.dump({**data, "images": images}, f)
+        json.dump({**data, "images": images, "annotations": annotations}, f)
 
     convert_coco(
         labels_dir=str(ann_dir),
