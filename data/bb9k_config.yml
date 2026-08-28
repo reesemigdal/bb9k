@@ -7,7 +7,7 @@ camera:
   height_ft: 4                         # camera height above the ground, in feet
   pitch_deg: 0.0                       # 0 = looking straight ahead, horizontally
   roll_deg: 0.0                        # 0 = camera level, not rotated
-  resolution: "MODE_1296_972"          # bbnk.camera.Resolution member: MODE_640_480, MODE_1296_972, MODE_1920_1080, MODE_2592_1944
+  resolution: "MODE_640_480"          # bbnk.camera.Resolution member: MODE_640_480, MODE_1296_972, MODE_1920_1080, MODE_2592_1944
 
 blaster:
   yaw_servo:

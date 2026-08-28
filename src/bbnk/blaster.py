@@ -198,8 +198,10 @@ class Blaster:
 
     def close(self) -> None:
         self.water_off()
-        self.yaw.close()
-        self.pitch.close()
+        self.yaw.setDegrees(0)
+        self.pitch.setDegrees(0)
+        # self.yaw.close()
+        # self.pitch.close()
         self.solenoid.close()
 
     def __enter__(self):
