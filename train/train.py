@@ -12,6 +12,8 @@ DATASETS = {
     "caltech": Path.home() / "data/bb9k/caltech-camera-traps/data.yaml",
     "oregon": Path.home() / "data/bb9k/oregon-critters/data.yaml",
     "combined": Path.home() / "data/bb9k/combined-animal/data.yaml",
+    "combined-full": Path.home() / "data/bb9k/combined-animal-full/data.yaml",
+    "combined-full-domestic": Path.home() / "data/bb9k/combined-animal-full-domestic/data.yaml",
 }
 RUNS_DIR = Path(__file__).parent / "runs"
 

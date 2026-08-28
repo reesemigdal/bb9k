@@ -12,6 +12,7 @@ def y1():
         drawn by hand and plotted manually to confirm the full pipeline works
     '''
     modelfn = '../data/bundet.pt'
+    modelfn = '../train/runs/bb9k_animal-2/weights/best.pt'
     imgfn = '../data/bus.jpg'
     imgfn = '../data/bunny2.webp'
 
@@ -23,6 +24,7 @@ def y1():
     # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
+    print('inferencing')
     n = 1
     for imgsz in (640, ):
         times = []
