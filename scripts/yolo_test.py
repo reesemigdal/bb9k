@@ -11,8 +11,9 @@ def y1():
         raw model outputs (boxes) - no results.plot()/save(), boxes/labels are
         drawn by hand and plotted manually to confirm the full pipeline works
     '''
-    modelfn = '../data/bundet.pt'
+    modelfn = '../data/best13.pt'
     imgfn = '../data/bus.jpg'
+    imgfn = '../data/bunny1.jpg'
     imgfn = '../data/bunny2.webp'
 
     print('loading',modelfn)
