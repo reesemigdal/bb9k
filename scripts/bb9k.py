@@ -28,8 +28,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / 'src'))
 
 from bbnk.blaster import Blaster
+from bbnk.camera import Resolution, crop_camera_matrix
 from bbnk.ground import GroundPlane
-from bbnk.utils import d2r
+from bbnk.utils import d2r, ft2m
 
 DEFAULT_CONFIG = REPO_ROOT / 'data' / 'bb9k_config.yml'
 
@@ -47,15 +48,48 @@ def load_calibration(calib_path):
     return camera_matrix, dist_coeffs, calib['image_width'], calib['image_height']
 
 
+def create_camera_intrinsics(camera_cfg):
+    """Load calibration and resolve it to the configured capture resolution.
+
+    camera_cfg['resolution'] is a bbnk.camera.Resolution member name (the
+    actual capture size, which may differ from the calibration's) -
+    camera_matrix is recomputed for it via crop_camera_matrix, exact for
+    all 4 modes (including the two that are sensor crops, not just a
+    uniform scale of the calibrated frame). Munged once here, at startup,
+    so everything downstream (GroundPlane, Picamera2's own config, ...)
+    just uses camera_matrix/resolution as-is.
+
+    Returns (camera_matrix, dist_coeffs, resolution).
+    """
+    camera_matrix, dist_coeffs, calib_width, calib_height = load_calibration(REPO_ROOT / camera_cfg['calib_file'])
+
+    try:
+        resolution = Resolution[camera_cfg['resolution']]
+    except KeyError:
+        raise ValueError(
+            f"unknown camera.resolution {camera_cfg['resolution']!r}; "
+            f"must be one of {[r.name for r in Resolution]}"
+        )
+    if (resolution.width, resolution.height) != (calib_width, calib_height):
+        camera_matrix = crop_camera_matrix(camera_matrix, (calib_width, calib_height), resolution)
+
+    return camera_matrix, dist_coeffs, resolution
+
+
 def create_ground_plane(camera_cfg):
-    """Build the GroundPlane (camera position) + intrinsics, from config."""
-    camera_matrix, dist_coeffs, width, height = load_calibration(REPO_ROOT / camera_cfg['calib_file'])
-    ground = GroundPlane(
-        camera_cfg['height_m'],
+    """Build the GroundPlane (camera position - height/pitch/roll) from config.
+
+    height_ft, if present, wins over height_m. No intrinsics/resolution
+    involved - purely the camera's pose - see create_camera_intrinsics for
+    those.
+    """
+    height_ft = camera_cfg.get('height_ft')
+    height_m = ft2m(height_ft) if height_ft is not None else camera_cfg['height_m']
+    return GroundPlane(
+        height_m,
         d2r(camera_cfg['pitch_deg']),
         d2r(camera_cfg['roll_deg']),
     )
-    return ground, camera_matrix, dist_coeffs, width, height
 
 
 def create_blaster(blaster_cfg):
@@ -122,15 +156,17 @@ def find_best_target(results, model, ground, camera_matrix, dist_coeffs, max_ran
     return best[1:] if best is not None else None
 
 
-def run_ground_squirt(ground, camera_matrix, dist_coeffs, width, height, blaster, yolo_model):
+def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, yolo_model, score_thresh):
     """Live camera feed; left-click a ground point to ready/aim/fire at it.
 
-    Every frame is also run through yolo_model; the best in-range detection
-    (see find_best_target) is auto-fired at. Same applet as ground_squirt1
-    in scripts/servo_test.py, plus detection.
+    Every frame is also run through yolo_model, keeping only detections with
+    confidence >= score_thresh; the best in-range one (see find_best_target)
+    is auto-fired at. Same applet as ground_squirt1 in scripts/servo_test.py,
+    plus detection.
     """
     from picamera2 import Picamera2
 
+    width, height = resolution.width, resolution.height
     horizon_pts = ground.horizon_points(camera_matrix, width, dist_coeffs).astype(np.int32)
     max_range_m = blaster.max_horizontal_range_m(-ground.height_m)
     can_hit_pts = ground.max_range_points(camera_matrix, width, max_range_m, dist_coeffs).astype(np.int32)
@@ -156,16 +192,20 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, width, height, blaster
     try:
         while True:
             frame = picam2.capture_array()
-            results = yolo_model.predict(frame, verbose=False)
+            results = yolo_model.predict(frame, conf=score_thresh, verbose=False)
             draw_detections(frame, results, yolo_model)
-            target = find_best_target(results, yolo_model, ground, camera_matrix, dist_coeffs, max_range_m)
-            if target is not None:
-                fire_at_ground_point(ground, blaster, *target)
             cv2.polylines(frame, [horizon_pts], isClosed=False, color=(0, 255, 255), thickness=2)
             cv2.polylines(frame, [can_hit_pts], isClosed=False, color=(0, 0, 255), thickness=2)
+
+            # Show this frame (with its boxes) before firing, so the window
+            # holds the actual image being fired on while ready_aim_fire blocks.
             cv2.imshow(window_name, frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
+
+            target = find_best_target(results, yolo_model, ground, camera_matrix, dist_coeffs, max_range_m)
+            if target is not None:
+                fire_at_ground_point(ground, blaster, *target)
     finally:
         picam2.stop()
         cv2.destroyAllWindows()
@@ -180,11 +220,15 @@ def main():
 
     print('=== Bunny Blaster 9000 ===')
     yolo_model = create_yolo_model(cfg['yolo'])
-    ground, camera_matrix, dist_coeffs, width, height = create_ground_plane(cfg['camera'])
+    camera_matrix, dist_coeffs, resolution = create_camera_intrinsics(cfg['camera'])
+    ground = create_ground_plane(cfg['camera'])
     blaster = create_blaster(cfg['blaster'])
 
     try:
-        run_ground_squirt(ground, camera_matrix, dist_coeffs, width, height, blaster, yolo_model)
+        run_ground_squirt(
+            ground, camera_matrix, dist_coeffs, resolution, blaster, yolo_model,
+            score_thresh=cfg['yolo']['score_thresh'],
+        )
     finally:
         blaster.close()
 

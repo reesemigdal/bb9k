@@ -3,9 +3,11 @@
 
 camera:
   calib_file: data/camera_calib.yaml   # intrinsics (camera_matrix, dist_coeffs) - see scripts/calibrate_camera.py
-  height_m: 1.8288                     # camera height above the ground (6 ft)
+#  height_m: 1.8288                     # camera height above the ground (6 ft) - height_ft wins if set
+  height_ft: 4                         # camera height above the ground, in feet
   pitch_deg: 0.0                       # 0 = looking straight ahead, horizontally
   roll_deg: 0.0                        # 0 = camera level, not rotated
+  resolution: "MODE_1296_972"          # bbnk.camera.Resolution member: MODE_640_480, MODE_1296_972, MODE_1920_1080, MODE_2592_1944
 
 blaster:
   yaw_servo:
@@ -31,3 +33,4 @@ blaster:
 
 yolo:
   model_name: data/best13.pt
+  score_thresh: 0.4
