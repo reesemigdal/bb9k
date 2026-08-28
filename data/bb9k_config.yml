@@ -1,0 +1,36 @@
+# Bunny Blaster 9000 - main app config.
+# Paths are relative to the repo root (loaded via scripts/bb9k.py).
+
+camera:
+  calib_file: data/camera_calib.yaml   # intrinsics (camera_matrix, dist_coeffs) - see scripts/calibrate_camera.py
+#  height_m: 1.8288                     # camera height above the ground (6 ft) - height_ft wins if set
+  height_ft: 4                         # camera height above the ground, in feet
+  pitch_deg: 0.0                       # 0 = looking straight ahead, horizontally
+  roll_deg: 0.0                        # 0 = camera level, not rotated
+  resolution: "MODE_640_480"          # bbnk.camera.Resolution member: MODE_640_480, MODE_1296_972, MODE_1920_1080, MODE_2592_1944
+
+blaster:
+  yaw_servo:
+    gpio_pin: 18
+    pwm_hz: 80
+    min_pulse_us: 600
+    max_pulse_us: 2400
+    min_angle_deg: 0
+    max_angle_deg: 270
+  pitch_servo:
+    gpio_pin: 12
+    pwm_hz: 80
+    min_pulse_us: 600
+    max_pulse_us: 2400
+    min_angle_deg: 0
+    max_angle_deg: 270
+  solenoid_gpio_pin: 15
+  water_velocity_mps: 7
+  yaw_invert: true                     # servo turns left on positive angles - needs invert
+  pitch_invert: false                  # servo goes up on positive angles - already correct
+  yaw_zero_offset_deg: 125             # raw yaw servo angle = world yaw 0 (straight ahead)
+  pitch_zero_offset_deg: 130           # raw pitch servo angle = world pitch 0 (level)
+
+yolo:
+  model_name: data/best13.pt
+  score_thresh: 0.4
