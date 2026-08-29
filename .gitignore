@@ -4,4 +4,5 @@ __pycache__
 scripts/yolo_test_output.jpg
 calib_out/
 train/runs/
-
+logs/
+log/

@@ -113,7 +113,11 @@ def create_yolo_model(yolo_cfg):
 
 
 def create_loggers(log_cfg):
-    event_logger = EventLogger(REPO_ROOT / log_cfg['event_log_file'])
+    event_logger = EventLogger(
+        REPO_ROOT / log_cfg['event_log_file'],
+        max_bytes=log_cfg['event_log_max_bytes'],
+        prune_fraction=log_cfg['event_log_prune_fraction'],
+    )
     image_logger = ImageLogger(
         REPO_ROOT / log_cfg['image_dir'],
         max_bytes=log_cfg['image_max_bytes'],
@@ -135,8 +139,8 @@ def draw_detections(frame, results, model):
         cv2.putText(frame, label, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
 
-def fire_at_ground_point(ground, blaster, ground_cam, label, frame=None, detection=None,
-                          trigger='manual', event_logger=None, image_logger=None):
+def fire_at_ground_point(ground, blaster, ground_cam, label, frame=None, detection=None, pixel=None,
+                          image_size=None, trigger='manual', event_logger=None, image_logger=None):
     world_xyz = ground.to_world(ground_cam)
     print(f'{label} -> world XYZ (m): ({world_xyz[0]:.2f}, {world_xyz[1]:.2f}, {world_xyz[2]:.2f})')
     # aim_at/ready_aim_fire want camera-frame coords (standing in for
@@ -155,6 +159,10 @@ def fire_at_ground_point(ground, blaster, ground_cam, label, frame=None, detecti
             trigger=trigger,
             label=label,
             detection=detection,
+            pixel=pixel,
+            # bbox/pixel above are absolute pixel coords - meaningless without
+            # the frame size they were measured in.
+            image_size=list(image_size) if image_size is not None else None,
             ground_cam=[float(v) for v in ground_cam],
             world_xyz=[float(v) for v in world_xyz],
             camera_xyz=[float(x), float(y), float(z)],
@@ -225,6 +233,7 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
             print(f'pixel ({u},{v}) is above the horizon, no ground point to shoot')
             return
         fire_at_ground_point(ground, blaster, ground_cam, label=f'pixel ({u},{v})', frame=frame,
+                              pixel=[u, v], image_size=(width, height),
                               trigger='manual', event_logger=event_logger, image_logger=image_logger)
 
     picam2 = Picamera2()
@@ -256,6 +265,7 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
             if target is not None:
                 ground_cam, label, detection = target
                 fire_at_ground_point(ground, blaster, ground_cam, label, frame=frame, detection=detection,
+                                      image_size=(width, height),
                                       trigger='auto', event_logger=event_logger, image_logger=image_logger)
     finally:
         picam2.stop()

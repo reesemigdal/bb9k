@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Fire-event logging: a JSONL event record plus a size-capped image dump.
+"""Fire-event logging: a size-capped JSONL event log plus a size-capped image dump.
 
 EventLogger appends one JSON record per fire event (detection/aim/result
-data) to a JSONL file. ImageLogger saves the frame from that same event to
+data) to a JSONL file, dropping its own oldest lines if the file grows past
+a configured size cap. ImageLogger saves the frame from that same event to
 a directory, pruning its own oldest files if the directory grows past a
 configured size cap.
 """
@@ -15,16 +16,24 @@ from pathlib import Path
 
 import cv2
 
-DEFAULT_IMAGE_MAX_BYTES = 1_073_741_824  # 1 GiB
+DEFAULT_MAX_BYTES = 1_073_741_824  # 1 GiB
 DEFAULT_PRUNE_FRACTION = 0.25
 
 
 class EventLogger:
-    """Appends one JSON record per fire event to a JSONL file."""
+    """Appends one JSON record per fire event to a JSONL file, size-capped.
 
-    def __init__(self, path):
+    Once the file exceeds max_bytes, the oldest lines are dropped, freeing
+    prune_fraction of max_bytes in one pass (not just enough to dip back
+    under the cap) so a steady stream of events doesn't rewrite the file on
+    every single log() call.
+    """
+
+    def __init__(self, path, max_bytes=DEFAULT_MAX_BYTES, prune_fraction=DEFAULT_PRUNE_FRACTION):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.max_bytes = max_bytes
+        self.prune_fraction = prune_fraction
 
     def log(self, **fields):
         """Write one record (current timestamp + fields) as a JSON line.
@@ -37,7 +46,28 @@ class EventLogger:
         record = {'timestamp': datetime.now().isoformat(), **fields}
         with open(self.path, 'a') as f:
             f.write(json.dumps(record) + '\n')
+        self._prune()
         return record
+
+    def _prune(self):
+        """Drop oldest lines until the file is back under max_bytes."""
+        if self.path.stat().st_size <= self.max_bytes:
+            return
+
+        target = self.max_bytes * (1 - self.prune_fraction)
+        lines = self.path.read_text().splitlines(keepends=True)
+
+        kept, kept_size = [], 0
+        for line in reversed(lines):
+            if kept_size + len(line) > target:
+                break
+            kept.append(line)
+            kept_size += len(line)
+        kept.reverse()
+
+        tmp_path = self.path.with_suffix(self.path.suffix + '.tmp')
+        tmp_path.write_text(''.join(kept))
+        tmp_path.replace(self.path)
 
 
 class ImageLogger:
@@ -52,7 +82,7 @@ class ImageLogger:
     sorted first.
     """
 
-    def __init__(self, directory, max_bytes=DEFAULT_IMAGE_MAX_BYTES,
+    def __init__(self, directory, max_bytes=DEFAULT_MAX_BYTES,
                  prune_fraction=DEFAULT_PRUNE_FRACTION, prefix='bb9k', ext='jpg'):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
