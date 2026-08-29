@@ -24,6 +24,7 @@ def y1():
     # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
+    print('inferencing')
     n = 1
     for imgsz in (640, ):
         times = []
