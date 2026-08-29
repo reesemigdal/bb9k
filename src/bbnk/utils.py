@@ -64,43 +64,48 @@ def apply_transform(T_a2b, points_a):
     return homogeneous_b[..., :3] / homogeneous_b[..., 3:4]
 
 def isp_compute_gamma_lut(gamma):
-    """Precompute a 256-entry uint8->float16 gamma-correction lookup table.
+    """Precompute a 256-entry uint8->float32 gamma-correction lookup table.
 
     lut[i] = 255 * (i/255)**(1/gamma), for i in 0..255 (2.2 is a typical
     display gamma). Built once per gamma value so isp_apply can gamma-
     correct a whole image with a single fancy-index lookup.
     """
-    i = np.arange(256, dtype=np.float16)
-    return (255.0 * (i / 255.0) ** (1.0 / gamma)).astype(np.float16)
+    i = np.arange(256, dtype=np.float32)
+    return (255.0 * (i / 255.0) ** (1.0 / gamma)).astype(np.float32)
 
 
-def isp_apply(img, gamma=2.2):
+def isp_apply(img, gamma=2.2, percentile_sample_size=(320, 200)):
     """Software ISP pass: gamma correction + 1st/99th percentile auto-contrast.
 
-    img (uint8) is gamma-corrected via isp_compute_gamma_lut(gamma) into
-    float16, its 1st/99th brightness percentiles (of the grayscale
-    gamma-corrected image, if img is color) are used to compute the linear
-    scale/offset that stretches them to fill 0-255, and that scale/offset
-    is applied to the (still-color) gamma-corrected image. Result is
-    clipped to [0, 255] before converting back to uint8, so values can't
-    roll over.
+    Rather than gamma-correcting the full image and then separately scaling
+    it, this estimates the scale/offset first (from a cheap subsample) and
+    folds gamma+scale+offset+clip into one combined 256-entry uint8->uint8
+    LUT, so the only full-resolution work is a single fancy-index lookup.
+
+    1st/99th brightness percentiles are estimated from a strided subsample
+    of all channels (no separate grayscale conversion - np.percentile
+    doesn't care that R/G/B values from the same pixel end up as separate
+    samples), downsampled to about percentile_sample_size (width, height)
+    pixels, gamma-corrected via isp_compute_gamma_lut(gamma). That scale/
+    offset is baked into a combined LUT alongside the gamma curve, clipped
+    to [0, 255] and cast to uint8 up front so applying it to the full image
+    can't roll over.
     """
     img = np.asarray(img, dtype=np.uint8)
-    gamma_img = isp_compute_gamma_lut(gamma)[img]
+    gamma_lut = isp_compute_gamma_lut(gamma)
 
-    if gamma_img.ndim == 3 and gamma_img.shape[2] > 1:
-        b, g, r = gamma_img[..., 0], gamma_img[..., 1], gamma_img[..., 2]
-        gray = r * np.float16(0.299) + g * np.float16(0.587) + b * np.float16(0.114)
-    else:
-        gray = gamma_img
+    h, w = img.shape[:2]
+    target_w, target_h = percentile_sample_size
+    stride_h = max(1, h // target_h)
+    stride_w = max(1, w // target_w)
+    sample = gamma_lut[img[::stride_h, ::stride_w]]
 
-    lo, hi = np.percentile(gray, [1, 99])
+    lo, hi = np.percentile(sample, [1, 99])
     if hi <= lo:
         scale, offset = 1.0, 0.0
     else:
         scale = 255.0 / (hi - lo)
         offset = -lo * scale
 
-    out = gamma_img * scale + offset
-    out = np.clip(out, 0, 255)
-    return out.astype(np.uint8)
+    combined_lut = np.clip(gamma_lut * scale + offset, 0, 255).astype(np.uint8)
+    return combined_lut[img]
