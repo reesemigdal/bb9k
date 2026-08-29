@@ -30,7 +30,8 @@ sys.path.insert(0, str(REPO_ROOT / 'src'))
 from bbnk.blaster import Blaster
 from bbnk.camera import Resolution, crop_camera_matrix
 from bbnk.ground import GroundPlane
-from bbnk.utils import d2r, ft2m
+from bbnk.log import EventLogger, ImageLogger
+from bbnk.utils import d2r, ft2m, isp_apply
 
 DEFAULT_CONFIG = REPO_ROOT / 'data' / 'bb9k_config.yml'
 
@@ -111,6 +112,16 @@ def create_yolo_model(yolo_cfg):
     return YOLO(str(model_path))
 
 
+def create_loggers(log_cfg):
+    event_logger = EventLogger(REPO_ROOT / log_cfg['event_log_file'])
+    image_logger = ImageLogger(
+        REPO_ROOT / log_cfg['image_dir'],
+        max_bytes=log_cfg['image_max_bytes'],
+        prune_fraction=log_cfg['image_prune_fraction'],
+    )
+    return event_logger, image_logger
+
+
 def draw_detections(frame, results, model):
     """Draw yolo boxes/labels (as in yolo_test.py's y1()) onto frame, in place."""
     for box in results[0].boxes:
@@ -124,25 +135,45 @@ def draw_detections(frame, results, model):
         cv2.putText(frame, label, (x1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
 
-def fire_at_ground_point(ground, blaster, ground_cam, label):
+def fire_at_ground_point(ground, blaster, ground_cam, label, frame=None, detection=None,
+                          trigger='manual', event_logger=None, image_logger=None):
     world_xyz = ground.to_world(ground_cam)
     print(f'{label} -> world XYZ (m): ({world_xyz[0]:.2f}, {world_xyz[1]:.2f}, {world_xyz[2]:.2f})')
     # aim_at/ready_aim_fire want camera-frame coords (standing in for
     # turret-frame until T_c2t is defined - see GroundPlane.to_camera).
     x, y, z = ground.to_camera(world_xyz)
+    aim, error = None, None
     try:
-        blaster.ready_aim_fire(x, y, z)
+        aim = blaster.ready_aim_fire(x, y, z)
     except ValueError as e:
+        error = str(e)
         print(f'  cannot aim there: {e}')
+
+    image_file = image_logger.save(frame) if image_logger is not None and frame is not None else None
+    if event_logger is not None:
+        event_logger.log(
+            trigger=trigger,
+            label=label,
+            detection=detection,
+            ground_cam=[float(v) for v in ground_cam],
+            world_xyz=[float(v) for v in world_xyz],
+            camera_xyz=[float(x), float(y), float(z)],
+            aim=None if aim is None else {'yaw_deg': aim.yaw_deg, 'pitch_deg': aim.pitch_deg},
+            fired=aim is not None,
+            error=error,
+            image_file=image_file,
+        )
 
 
 def find_best_target(results, model, ground, camera_matrix, dist_coeffs, max_range_m):
     """Highest-confidence detection whose centroid is in the "can fire" zone.
 
-    Returns (ground_cam, label) for the winner, or None if no detection's
-    centroid maps to a ground point (below the horizon) within max_range_m.
+    Returns (ground_cam, label, detection) for the winner, or None if no
+    detection's centroid maps to a ground point (below the horizon) within
+    max_range_m. detection is a dict of the winning box's class/confidence/
+    bbox/pixel centroid, for event logging.
     """
-    best = None  # (conf, ground_cam, label)
+    best = None  # (conf, ground_cam, label, detection)
     for box in results[0].boxes:
         x1, y1, x2, y2 = box.xyxy[0]
         cx, cy = float((x1 + x2) / 2), float((y1 + y2) / 2)
@@ -152,17 +183,31 @@ def find_best_target(results, model, ground, camera_matrix, dist_coeffs, max_ran
         conf = float(box.conf)
         if best is None or conf > best[0]:
             cls_name = model.names[int(box.cls)]
-            best = (conf, ground_cam, f'{cls_name} {conf:.2f} at pixel ({cx:.0f},{cy:.0f})')
+            detection = {
+                'class': cls_name,
+                'confidence': conf,
+                'bbox': [float(x1), float(y1), float(x2), float(y2)],
+                'pixel': [cx, cy],
+            }
+            best = (conf, ground_cam, f'{cls_name} {conf:.2f} at pixel ({cx:.0f},{cy:.0f})', detection)
     return best[1:] if best is not None else None
 
 
-def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, yolo_model, score_thresh):
+def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, yolo_model, score_thresh,
+                       auto_exposure=False, auto_gamma=2.2, event_logger=None, image_logger=None):
     """Live camera feed; left-click a ground point to ready/aim/fire at it.
 
     Every frame is also run through yolo_model, keeping only detections with
     confidence >= score_thresh; the best in-range one (see find_best_target)
     is auto-fired at. Same applet as ground_squirt1 in scripts/servo_test.py,
     plus detection.
+
+    auto_exposure: if True, each frame's brightness/contrast is stretched
+    via bbnk.utils.isp_apply (using auto_gamma) before detection/display.
+
+    event_logger/image_logger: if given, every fire (manual click or
+    auto-detect) is recorded via fire_at_ground_point - a JSONL record of
+    the detection/aim/result, and the frame it fired on.
     """
     from picamera2 import Picamera2
 
@@ -170,6 +215,7 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
     horizon_pts = ground.horizon_points(camera_matrix, width, dist_coeffs).astype(np.int32)
     max_range_m = blaster.max_horizontal_range_m(-ground.height_m)
     can_hit_pts = ground.max_range_points(camera_matrix, width, max_range_m, dist_coeffs).astype(np.int32)
+    frame = None
 
     def on_click(event, u, v, flags, userdata):
         if event != cv2.EVENT_LBUTTONDOWN:
@@ -178,7 +224,8 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
         if np.isnan(ground_cam[0]):
             print(f'pixel ({u},{v}) is above the horizon, no ground point to shoot')
             return
-        fire_at_ground_point(ground, blaster, ground_cam, label=f'pixel ({u},{v})')
+        fire_at_ground_point(ground, blaster, ground_cam, label=f'pixel ({u},{v})', frame=frame,
+                              trigger='manual', event_logger=event_logger, image_logger=image_logger)
 
     picam2 = Picamera2()
     config = picam2.create_video_configuration(main={"size": (width, height), "format": "RGB888"})
@@ -192,6 +239,8 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
     try:
         while True:
             frame = picam2.capture_array()
+            if auto_exposure:
+                frame = isp_apply(frame, gamma=auto_gamma)
             results = yolo_model.predict(frame, conf=score_thresh, verbose=False)
             draw_detections(frame, results, yolo_model)
             cv2.polylines(frame, [horizon_pts], isClosed=False, color=(0, 255, 255), thickness=2)
@@ -205,7 +254,9 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
 
             target = find_best_target(results, yolo_model, ground, camera_matrix, dist_coeffs, max_range_m)
             if target is not None:
-                fire_at_ground_point(ground, blaster, *target)
+                ground_cam, label, detection = target
+                fire_at_ground_point(ground, blaster, ground_cam, label, frame=frame, detection=detection,
+                                      trigger='auto', event_logger=event_logger, image_logger=image_logger)
     finally:
         picam2.stop()
         cv2.destroyAllWindows()
@@ -223,11 +274,16 @@ def main():
     camera_matrix, dist_coeffs, resolution = create_camera_intrinsics(cfg['camera'])
     ground = create_ground_plane(cfg['camera'])
     blaster = create_blaster(cfg['blaster'])
+    event_logger, image_logger = create_loggers(cfg['log'])
 
     try:
         run_ground_squirt(
             ground, camera_matrix, dist_coeffs, resolution, blaster, yolo_model,
             score_thresh=cfg['yolo']['score_thresh'],
+            auto_exposure=cfg['camera'].get('auto_exposure', False),
+            auto_gamma=cfg['camera'].get('auto_gamma', 2.2),
+            event_logger=event_logger,
+            image_logger=image_logger,
         )
     finally:
         blaster.close()

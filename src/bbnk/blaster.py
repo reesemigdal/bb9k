@@ -180,10 +180,11 @@ class Blaster:
 
     def ready_aim_fire(self, x, y, z, high_arc=False, aim_dur_s=0.5, fire_dur_s=2.0):
         print('aim!')
-        self.aim_at(x, y, z, high_arc)
+        aim = self.aim_at(x, y, z, high_arc)
         time.sleep(aim_dur_s)
         print('fire!')
         self.fire(fire_dur_s)
+        return aim
 
     def fire(self, duration_s: float) -> None:
         """Open the solenoid for duration_s seconds, then close it."""
