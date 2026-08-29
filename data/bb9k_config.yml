@@ -7,10 +7,11 @@ camera:
   height_ft: 3.25                      # camera height above the ground, in feet
   pitch_deg: 0.0                       # 0 = looking straight ahead, horizontally
   roll_deg:  0.0                       # 0 = camera level, not rotated
-  resolution: "MODE_2592_1944"         # bbnk.camera.Resolution member: MODE_640_480, MODE_1296_972, MODE_1920_1080, MODE_2592_1944
+  #resolution: "MODE_2592_1944"         # bbnk.camera.Resolution member: MODE_640_480, MODE_1296_972, MODE_1920_1080, MODE_2592_1944
+  resolution: "MODE_1296_972"         # bbnk.camera.Resolution member: MODE_640_480, MODE_1296_972, MODE_1920_1080, MODE_2592_1944
   #resolution: "MODE_640_480"           # bbnk.camera.Resolution member: MODE_640_480, MODE_1296_972, MODE_1920_1080, MODE_2592_1944
   auto_exposure: True                  # ensure correct brightness/contrast of images by applying sw isp functions
-  auto_gamma: 2.2                      # for auto-exposure, gamma value to apply
+  auto_gamma: 1.8                      # for auto-exposure, gamma value to apply
 
 blaster:
   yaw_servo:
