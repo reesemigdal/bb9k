@@ -40,8 +40,8 @@ yolo:
   score_thresh: 0.25
 
 log:
-  event_log_file: data/logs/events.jsonl   # jsonl record of each fire event (detection/aim/result data)
-  event_log_max_bytes: 1073741824          # cap on event_log_file's size (1 GiB) - oldest lines pruned past this
+  event_log_file: data/logs/events.jsonl   # jsonl record of each fire event - one file per day, e.g. events_2026_08_29.jsonl, new file each midnight
+  event_log_max_bytes: 1073741824          # cap on the total size of all dated event log files (1 GiB) - oldest whole files deleted past this
   event_log_prune_fraction: 0.25           # once over the cap, free this fraction of event_log_max_bytes in one pass
   image_dir: data/logs/images              # frame saved alongside each fire event
   image_max_bytes: 1073741824              # cap on image_dir's total size (1 GiB) - oldest images pruned past this

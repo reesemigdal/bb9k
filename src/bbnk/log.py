@@ -2,10 +2,10 @@
 """Fire-event logging: a size-capped JSONL event log plus a size-capped image dump.
 
 EventLogger appends one JSON record per fire event (detection/aim/result
-data) to a JSONL file, dropping its own oldest lines if the file grows past
-a configured size cap. ImageLogger saves the frame from that same event to
-a directory, pruning its own oldest files if the directory grows past a
-configured size cap.
+data) to a JSONL file partitioned by date, deleting its own oldest whole
+files if the total grows past a configured size cap. ImageLogger saves the
+frame from that same event to a directory, pruning its own oldest files if
+the directory grows past a configured size cap.
 """
 
 import itertools
@@ -21,19 +21,30 @@ DEFAULT_PRUNE_FRACTION = 0.25
 
 
 class EventLogger:
-    """Appends one JSON record per fire event to a JSONL file, size-capped.
+    """Appends one JSON record per fire event to a date-partitioned JSONL file.
 
-    Once the file exceeds max_bytes, the oldest lines are dropped, freeing
-    prune_fraction of max_bytes in one pass (not just enough to dip back
-    under the cap) so a steady stream of events doesn't rewrite the file on
-    every single log() call.
+    path's stem/suffix (e.g. 'events.jsonl') become a naming pattern - each
+    calendar day's events go to their own file, f'{stem}_{YYYY_MM_DD}
+    {suffix}' (e.g. 'events_2026_08_29.jsonl') in path's directory, rolling
+    over to a new file at midnight. Once the total size of these files
+    exceeds max_bytes, the oldest whole files are deleted (never rewritten
+    or truncated) until prune_fraction of max_bytes has been freed.
     """
 
     def __init__(self, path, max_bytes=DEFAULT_MAX_BYTES, prune_fraction=DEFAULT_PRUNE_FRACTION):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        path = Path(path)
+        self.directory = path.parent
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.stem = path.stem
+        self.suffix = path.suffix
         self.max_bytes = max_bytes
         self.prune_fraction = prune_fraction
+
+    def _file_for(self, dt):
+        return self.directory / f"{self.stem}_{dt.strftime('%Y_%m_%d')}{self.suffix}"
+
+    def _our_files(self):
+        return sorted(self.directory.glob(f'{self.stem}_*{self.suffix}'))
 
     def log(self, **fields):
         """Write one record (current timestamp + fields) as a JSON line.
@@ -41,33 +52,36 @@ class EventLogger:
         fields is whatever the caller wants recorded (detection data, aim
         solution, fire outcome, ...) - just make sure every value is
         JSON-serializable (floats/ints/str/bool/None/list/dict, not numpy
-        scalars or arrays).
+        scalars or arrays). Appended to today's file (see _file_for),
+        creating it if today is the first event since the last rollover.
         """
-        record = {'timestamp': datetime.now().isoformat(), **fields}
-        with open(self.path, 'a') as f:
+        now = datetime.now()
+        record = {'timestamp': now.isoformat(), **fields}
+        with open(self._file_for(now), 'a') as f:
             f.write(json.dumps(record) + '\n')
         self._prune()
         return record
 
     def _prune(self):
-        """Drop oldest lines until the file is back under max_bytes."""
-        if self.path.stat().st_size <= self.max_bytes:
+        """Delete oldest whole day-files until usage is back under max_bytes.
+
+        Never rewrites or truncates a file - only ever deletes one
+        entirely - and frees prune_fraction of max_bytes in one pass (not
+        just enough to dip back under the cap) so a steady stream of
+        events doesn't trigger a delete on every single log() call.
+        """
+        files = self._our_files()
+        sizes = [f.stat().st_size for f in files]
+        total = sum(sizes)
+        if total <= self.max_bytes:
             return
 
         target = self.max_bytes * (1 - self.prune_fraction)
-        lines = self.path.read_text().splitlines(keepends=True)
-
-        kept, kept_size = [], 0
-        for line in reversed(lines):
-            if kept_size + len(line) > target:
+        for f, size in zip(files, sizes):
+            if total <= target:
                 break
-            kept.append(line)
-            kept_size += len(line)
-        kept.reverse()
-
-        tmp_path = self.path.with_suffix(self.path.suffix + '.tmp')
-        tmp_path.write_text(''.join(kept))
-        tmp_path.replace(self.path)
+            f.unlink()
+            total -= size
 
 
 class ImageLogger:
