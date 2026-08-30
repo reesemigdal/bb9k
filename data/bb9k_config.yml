@@ -39,6 +39,15 @@ yolo:
   model_name: data/combined_domestic.pt
   score_thresh: 0.25
 
+motion:
+  width: 320                   # small working frame motion detection runs on (subsampled from the full camera frame)
+  height: 240
+  diff_thresh: 25               # static floor on the per-pixel abs-diff (0-255) threshold - actual threshold is max(diff_thresh, noise_multiplier * noise_floor)
+  noise_window_s: 10.0           # IIR time constant (seconds) for the noise_floor estimate - adapts the threshold to noisier conditions (e.g. nighttime sensor noise)
+  noise_multiplier: 2.0          # dynamic threshold = this many x noise_floor
+  gap_span: 5                   # closes (dilate+erode) gaps up to ~this many small-frame px before cc analysis, so nearby blobs merge into one region - 0 disables
+  min_area: 500                 # min connected-component area, in small-frame px (post gap_span close), to count as a motion region - filters out noise
+
 log:
   event_log_file: data/logs/events.jsonl   # jsonl record of each fire event - one file per day, e.g. events_2026_08_29.jsonl, new file each midnight
   event_log_max_bytes: 1073741824          # cap on the total size of all dated event log files (1 GiB) - oldest whole files deleted past this
