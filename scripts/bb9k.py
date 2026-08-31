@@ -62,7 +62,7 @@ def create_camera_intrinsics(camera_cfg):
 
     Returns (camera_matrix, dist_coeffs, resolution).
     """
-    camera_matrix, dist_coeffs, calib_width, calib_height = load_calibration(REPO_ROOT / camera_cfg['calib_file'])
+    camera_matrix, dist_coeffs, calib_width, calib_height = load_calibration(camera_cfg['calib_file'])
 
     try:
         resolution = Resolution[camera_cfg['resolution']]
@@ -107,37 +107,46 @@ def create_blaster(blaster_cfg):
 
 
 def create_yolo_model(yolo_cfg):
-    model_path = REPO_ROOT / yolo_cfg['model_name']
+    model_path = yolo_cfg['model_name']
     print('loading yolo model:', model_path)
     return YOLO(str(model_path))
 
 
 def create_loggers(log_cfg):
     event_logger = EventLogger(
-        REPO_ROOT / log_cfg['event_log_file'],
+        log_cfg['event_log_file'],
         max_bytes=log_cfg['event_log_max_bytes'],
         prune_fraction=log_cfg['event_log_prune_fraction'],
     )
     image_logger = ImageLogger(
-        REPO_ROOT / log_cfg['image_dir'],
+        log_cfg['image_dir'],
         max_bytes=log_cfg['image_max_bytes'],
         prune_fraction=log_cfg['image_prune_fraction'],
     )
     labeled_image_logger = ImageLogger(
-        REPO_ROOT / log_cfg['labeled_image_dir'],
+        log_cfg['labeled_image_dir'],
         max_bytes=log_cfg['labeled_image_max_bytes'],
         prune_fraction=log_cfg['labeled_image_prune_fraction'],
     )
     return event_logger, image_logger, labeled_image_logger
 
 
-def draw_detections(frame, results, model):
-    """Draw yolo boxes/labels (as in yolo_test.py's y1()) onto frame, in place."""
+def yolo_detection_boxes(results, model):
+    """(x1, y1, x2, y2, label) for each box in a YOLO results object - for draw_detections."""
+    boxes = []
     for box in results[0].boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         cls_name = model.names[int(box.cls)]
-        label = f'{cls_name} {float(box.conf):.2f}'
+        boxes.append((x1, y1, x2, y2, f'{cls_name} {float(box.conf):.2f}'))
+    return boxes
 
+
+def draw_detections(frame, boxes):
+    """Draw bounding boxes with labels onto frame, in place.
+
+    boxes: iterable of (x1, y1, x2, y2, label) - see yolo_detection_boxes.
+    """
+    for x1, y1, x2, y2, label in boxes:
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
         cv2.rectangle(frame, (x1, y1 - th - 6), (x1 + tw, y1), (0, 255, 0), -1)
@@ -240,8 +249,13 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
         image_file = image_logger.save(frame) if image_logger is not None and frame is not None else None
         # labeled_frame is derivable from image_file + this record's detection
         # data, so labeled_image_logger just saves it for convenience, not logged.
-        if labeled_image_logger is not None and labeled_frame is not None:
-            labeled_image_logger.save(labeled_frame)
+        # There's no yolo detection box for a manual click - stub one in around
+        # the clicked pixel, labeled the same as this event's own `label`.
+        if labeled_image_logger is not None and frame is not None:
+            manual_labeled_frame = frame.copy()
+            box_half = 15
+            draw_detections(manual_labeled_frame, [(u - box_half, v - box_half, u + box_half, v + box_half, label)])
+            labeled_image_logger.save(manual_labeled_frame)
         if event_logger is not None:
             event_logger.log(
                 trigger='manual',
@@ -276,7 +290,7 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
                 frame = isp_apply(frame, gamma=auto_gamma)
             results = yolo_model.predict(frame, conf=score_thresh, verbose=False)
             labeled_frame = frame.copy()
-            draw_detections(labeled_frame, results, yolo_model)
+            draw_detections(labeled_frame, yolo_detection_boxes(results, yolo_model))
             #cv2.polylines(frame, [horizon_pts], isClosed=False, color=(0, 255, 255), thickness=2)
             #cv2.polylines(frame, [can_hit_pts], isClosed=False, color=(0, 0, 255), thickness=2)
 

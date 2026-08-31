@@ -1,5 +1,6 @@
 # Bunny Blaster 9000 - main app config.
-# Paths are relative to the repo root (loaded via scripts/bb9k.py).
+# Paths are taken as-is (relative to cwd if not absolute) - run scripts/bb9k.py
+# from the repo root, or use paths relative to wherever you run it from.
 
 camera:
   calib_file: data/camera_calib.yaml   # intrinsics (camera_matrix, dist_coeffs) - see scripts/calibrate_camera.py
@@ -55,6 +56,6 @@ log:
   image_dir: data/logs/images              # frame saved alongside each fire event
   image_max_bytes: 1073741824              # cap on image_dir's total size (1 GiB) - oldest images pruned past this
   image_prune_fraction: 0.25               # once over the cap, free this fraction of image_max_bytes in one pass
-  labeled_image_dir: logs/labeled                  # same frame, annotated (boxes/labels drawn on), saved alongside each fire event
+  labeled_image_dir: data/logs/labeled                  # same frame, annotated (boxes/labels drawn on), saved alongside each fire event
   labeled_image_max_bytes: 1073741824              # cap on labeled_image_dir's total size (1 GiB) - oldest images pruned past this
   labeled_image_prune_fraction: 0.25               # once over the cap, free this fraction of labeled_image_max_bytes in one pass
