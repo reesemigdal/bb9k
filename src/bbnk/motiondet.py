@@ -34,10 +34,10 @@ class MotionDetector:
     cv2.resize) down to (width, height) - default 320x240 - writing
     directly into a buffer allocated once at construction, so repeated
     calls do no per-frame allocation for the resize itself. The only state
-    kept across calls is prev_det, a copy of that same small frame from the
-    previous process() call, which the current one is diffed against. The
-    first call has no prev_det yet to diff against, so it reports no motion
-    (regions stay empty) - it just seeds state for the next call.
+    kept across calls is prev_frame, a copy of that same small frame from
+    the previous process() call, which the current one is diffed against.
+    The first call has no prev_frame yet to diff against, so it reports no
+    motion (regions stay empty) - it just seeds state for the next call.
 
     Before connected-component analysis, the thresholded mask is closed
     (dilate then erode, cv2.MORPH_CLOSE) with a gap_span-sized kernel, so
@@ -50,23 +50,27 @@ class MotionDetector:
     with area >= min_area. min_area and gap_span are both in small-frame
     (width x height) pixels - that's where the mask/cc analysis actually
     happen - but the returned regions themselves are scaled back up to the
-    resolution of the frame last passed to process(), since that's the
-    frame callers actually have in hand.
+    resolution of the bgr_image last passed to process(), since that's the
+    image callers actually have in hand.
 
     Dynamic threshold: diff_thresh is a floor, not the whole story. Each
-    frame's mean small-frame pixel diff is folded into noise_floor, an IIR
-    (exponential moving average) estimate of the sensor's noise level -
-    (1-alpha)*old + alpha*new, with alpha derived each call from the actual
-    time since the previous one (via time.monotonic()) so the estimate
-    tracks a noise_window_s-second window regardless of frame rate:
-    alpha = 1 - exp(-dt / noise_window_s). The mask is then thresholded at
-    max(diff_thresh, noise_multiplier * noise_floor) - noise_multiplier
-    default 2.0, i.e. "2x the noise floor" - so on a clean, well-lit feed
-    the static diff_thresh (which is always a lower bound) governs, but
-    under noisier conditions (e.g. a noisy sensor at night) the threshold
-    rises to track it and false motion from sensor noise is suppressed.
-    noise_floor/dynamic_thresh/effective_thresh (the actual per-frame
-    values) are kept as attributes, mainly for logging/tuning.
+    frame's 90th-percentile small-frame pixel diff (p90_diff - the upper
+    tail of the noise distribution, a closer proxy for "how large can a
+    normal noise pixel get" than the mean, which just tracks its average
+    magnitude) is folded into noise_floor, an IIR (exponential moving
+    average) estimate of the sensor's noise level - (1-alpha)*old +
+    alpha*new, with alpha derived
+    each call from the actual time since the previous one (via
+    time.monotonic()) so the estimate tracks a noise_window_s-second
+    window regardless of frame rate: alpha = 1 - exp(-dt / noise_window_s).
+    The mask is then thresholded at max(diff_thresh, noise_multiplier *
+    noise_floor) - noise_multiplier default 2.0, i.e. "2x the noise floor"
+    - so on a clean, well-lit feed the static diff_thresh (which is always
+    a lower bound) governs, but under noisier conditions (e.g. a noisy
+    sensor at night) the threshold rises to track it and false motion from
+    sensor noise is suppressed. p90_diff/noise_floor/dynamic_thresh/
+    effective_thresh (the actual per-frame values) are kept as attributes,
+    mainly for logging/tuning.
     """
 
     def __init__(
@@ -87,12 +91,13 @@ class MotionDetector:
         self.noise_window_s = noise_window_s
         self.noise_multiplier = noise_multiplier
 
-        self._det = np.empty((height, width, 3), dtype=np.uint8)  # resize dst, reused every process() call
-        self.prev_det = None
+        self.frame = np.empty((height, width, 3), dtype=np.uint8)  # resize dst, reused every process() call
+        self.prev_frame = None
         self._motion_mask = np.zeros((height, width), dtype=np.uint8)
         self._regions = []
 
-        self.noise_floor = None       # IIR mean-abs-diff estimate; None until the 2nd process() call
+        self.p90_diff = None            # this call's raw p90 small-frame abs-diff; None until the 2nd process() call
+        self.noise_floor = None       # IIR p90-abs-diff estimate; None until the 2nd process() call
         self.dynamic_thresh = None    # noise_multiplier * noise_floor
         self.effective_thresh = None  # max(diff_thresh, dynamic_thresh), clamped to 255 - what's actually applied
         self._last_time = None
@@ -104,50 +109,52 @@ class MotionDetector:
             if gap_span > 0 else None
         )
 
-    def process(self, frame):
-        """Subsample frame (full camera size, BGR) and diff it against prev_det.
+    def process(self, bgr_image):
+        """Subsample bgr_image (full camera size, BGR) and diff it against prev_frame.
 
-        Resizes frame down to (width, height) in place into the
+        Resizes bgr_image down to (width, height) in place into the
         preallocated small-frame buffer (nearest-neighbor interpolation) -
-        this is the only per-frame work when there's no prev_det yet to
+        this is the only per-frame work when there's no prev_frame yet to
         diff against. Once there is one, abs-diffs the two small frames,
-        grayscales it, updates noise_floor from its mean and derives this
-        call's effective_thresh from that (see the dynamic-threshold note
-        on this class), thresholds at effective_thresh, then closes small
-        gaps (gap_span) before refreshing the motion mask/regions (see
+        grayscales it, updates noise_floor from its p90 (see p90_diff) and
+        derives this call's effective_thresh from that (see the
+        dynamic-threshold note on this class), thresholds at
+        effective_thresh, then closes small gaps (gap_span) before
+        refreshing the motion mask/regions (see
         get_motion_regions/get_motion_mask) - regions are scaled up to
-        frame's own resolution, which need not be the same across calls
-        (e.g. if the caller changes capture resolution). prev_det is then
+        bgr_image's own resolution, which need not be the same across calls
+        (e.g. if the caller changes capture resolution). prev_frame is then
         updated to this call's small frame regardless, so the next call
         has something to diff against. Returns get_motion_regions().
         """
         now = time.monotonic()
-        cv2.resize(frame, (self.width, self.height), dst=self._det, interpolation=cv2.INTER_NEAREST)
+        cv2.resize(bgr_image, (self.width, self.height), dst=self.frame, interpolation=cv2.INTER_NEAREST)
 
-        if self.prev_det is not None:
-            diff = cv2.absdiff(self._det, self.prev_det)
-            gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+        if self.prev_frame is None:
+            self.prev_frame = self.frame.copy()
+            self._last_time = now
+            return []
 
-            noise_sample = float(np.mean(gray_diff))
-            if self.noise_floor is None:
-                self.noise_floor = noise_sample
-            else:
-                dt = now - self._last_time
-                alpha = 1.0 - math.exp(-dt / self.noise_window_s) if self.noise_window_s > 0 else 1.0
-                self.noise_floor = (1 - alpha) * self.noise_floor + alpha * noise_sample
-            self.dynamic_thresh = self.noise_multiplier * self.noise_floor
-            self.effective_thresh = min(255.0, max(self.diff_thresh, self.dynamic_thresh))
+        diff = cv2.absdiff(self.frame, self.prev_frame)
+        gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
 
-            cv2.threshold(gray_diff, self.effective_thresh, 255, cv2.THRESH_BINARY, dst=self._motion_mask)
-            if self._close_kernel is not None:
-                cv2.morphologyEx(self._motion_mask, cv2.MORPH_CLOSE, self._close_kernel, dst=self._motion_mask)
-            frame_h, frame_w = frame.shape[:2]
-            self._regions = self._find_regions(self._motion_mask, frame_w / self.width, frame_h / self.height)
+        self.p90_diff = float(np.percentile(gray_diff, 90))
+        if self.noise_floor is None:
+            self.noise_floor = self.p90_diff
         else:
-            self._motion_mask[:] = 0
-            self._regions = []
+            dt = now - self._last_time
+            alpha = 1.0 - math.exp(-dt / self.noise_window_s) if self.noise_window_s > 0 else 1.0
+            self.noise_floor = (1 - alpha) * self.noise_floor + alpha * self.p90_diff
+        self.dynamic_thresh = self.noise_multiplier * self.noise_floor
+        self.effective_thresh = min(255.0, max(self.diff_thresh, self.dynamic_thresh))
 
-        self.prev_det = self._det.copy()
+        cv2.threshold(gray_diff, self.effective_thresh, 255, cv2.THRESH_BINARY, dst=self._motion_mask)
+        if self._close_kernel is not None:
+            cv2.morphologyEx(self._motion_mask, cv2.MORPH_CLOSE, self._close_kernel, dst=self._motion_mask)
+        image_h, image_w = bgr_image.shape[:2]
+        self._regions = self._find_regions(self._motion_mask, image_w / self.width, image_h / self.height)
+
+        self.prev_frame = self.frame.copy()
         self._last_time = now
         return self._regions
 
@@ -168,9 +175,9 @@ class MotionDetector:
     def get_motion_regions(self):
         """Bounding boxes of the last process() call's motion, as (x, y, w, h, area).
 
-        In the pixel coordinates of the frame passed to that process()
+        In the pixel coordinates of the bgr_image passed to that process()
         call (not the small working frame). Empty if process() has not yet
-        been called, or was called only once (no prev_det yet on that
+        been called, or was called only once (no prev_frame yet on that
         first call).
         """
         return self._regions
