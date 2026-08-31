@@ -18,6 +18,7 @@ at an arbitrary ground point too.
 import argparse
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -31,6 +32,7 @@ from bbnk.blaster import Blaster
 from bbnk.camera import Resolution, crop_camera_matrix
 from bbnk.ground import GroundPlane
 from bbnk.log import EventLogger, ImageLogger
+from bbnk.motiondet import MotionDetector
 from bbnk.utils import d2r, ft2m, isp_apply
 
 DEFAULT_CONFIG = REPO_ROOT / 'data' / 'bb9k_config.yml'
@@ -104,6 +106,10 @@ def create_blaster(blaster_cfg):
         yaw_zero_offset_deg=blaster_cfg.get('yaw_zero_offset_deg'),
         pitch_zero_offset_deg=blaster_cfg.get('pitch_zero_offset_deg'),
     )
+
+
+def create_motion_detector(motion_cfg):
+    return MotionDetector(**motion_cfg)
 
 
 def create_yolo_model(yolo_cfg):
@@ -206,7 +212,7 @@ def fire_at_ground(ground, blaster, ground_cam):
 
 def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, yolo_model, score_thresh,
                        auto_exposure=False, auto_gamma=2.2, event_logger=None, image_logger=None,
-                       labeled_image_logger=None):
+                       labeled_image_logger=None, motion_detector=None):
     """Live camera feed; left-click a ground point to ready/aim/fire at it.
 
     Every frame is also run through yolo_model, keeping only detections with
@@ -223,6 +229,10 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
     saves that same frame with detection boxes/labels drawn on it (see
     draw_detections) - a separate copy, so the plain frame saved by
     image_logger is untouched.
+
+    motion_detector: if given, every frame is also run through it (see
+    bbnk.motiondet.MotionDetector) and its per-frame diagnostics are
+    printed. Not wired into firing yet - purely observational.
     """
     from picamera2 import Picamera2
 
@@ -288,21 +298,46 @@ def run_ground_squirt(ground, camera_matrix, dist_coeffs, resolution, blaster, y
             frame = picam2.capture_array()
             if auto_exposure:
                 frame = isp_apply(frame, gamma=auto_gamma)
+            # results = [SimpleNamespace(boxes=[])]  # stub: no detections
             results = yolo_model.predict(frame, conf=score_thresh, verbose=False)
             labeled_frame = frame.copy()
             draw_detections(labeled_frame, yolo_detection_boxes(results, yolo_model))
             #cv2.polylines(frame, [horizon_pts], isClosed=False, color=(0, 255, 255), thickness=2)
             #cv2.polylines(frame, [can_hit_pts], isClosed=False, color=(0, 0, 255), thickness=2)
 
+            if motion_detector is not None:
+                motion_detector.process(frame)
+                print(
+                    f'motion: p90_diff={motion_detector.p90_diff} '
+                    f'noise_floor={motion_detector.noise_floor} '
+                    f'dynamic_thresh={motion_detector.dynamic_thresh} '
+                    f'effective_thresh={motion_detector.effective_thresh} '
+                    f'diff_thresh={motion_detector.diff_thresh}'
+                )
+
             # Show this frame (with its boxes) before firing, so the window
             # holds the actual image being fired on while ready_aim_fire blocks.
-            cv2.imshow(window_name, frame)
+            if 0:
+                cv2.imshow(window_name, frame)
+            if 0:
+                # frame diff mask
+                cv2.imshow(window_name, cv2.cvtColor(motion_detector.get_motion_mask(), cv2.COLOR_GRAY2BGR))
+            if 1: # frame diff overlaid on img
+                # debug view: frame with motion_detector's mask (upscaled to
+                # frame's resolution) highlighted in red - flip this only
+                # when motion_detector is actually enabled above.
+                mask_full = cv2.resize(motion_detector.get_motion_mask(), (frame.shape[1], frame.shape[0]),
+                                        interpolation=cv2.INTER_NEAREST)
+                overlay = frame.copy()
+                overlay[mask_full > 0] = (0, 0, 255)
+                cv2.imshow(window_name, cv2.addWeighted(frame, 0.5, overlay, 0.5, 0))
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
             target = find_best_target(results, yolo_model, ground, camera_matrix, dist_coeffs, max_range_m)
             if target is None:
                 continue
+
             ground_cam, label, detection = target
 
             world_xyz, camera_xyz, aim, error = fire_at_ground(ground, blaster, ground_cam)
@@ -349,6 +384,7 @@ def main():
     ground = create_ground_plane(cfg['camera'])
     blaster = create_blaster(cfg['blaster'])
     event_logger, image_logger, labeled_image_logger = create_loggers(cfg['log'])
+    motion_detector = create_motion_detector(cfg['motion'])
 
     try:
         run_ground_squirt(
@@ -359,6 +395,7 @@ def main():
             event_logger=event_logger,
             image_logger=image_logger,
             labeled_image_logger=labeled_image_logger,
+            motion_detector=motion_detector,
         )
     finally:
         blaster.close()
